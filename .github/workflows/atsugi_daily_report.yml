@@ -1,0 +1,39 @@
+name: Atsugi Daily Report
+
+on:
+  schedule:
+    # 毎日UTC 15:00 (JST 0:00)
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run script
+        env:
+          TARGET_FOLDER_ID: ${{ secrets.TARGET_FOLDER_ID }}
+          TARGET_SPREADSHEET_ID: ${{ secrets.TARGET_SPREADSHEET_ID }}
+        run: python src/aggregate_report.py
