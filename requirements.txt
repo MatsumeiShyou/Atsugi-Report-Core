@@ -2,5 +2,6 @@ pandas==3.0.5
 gspread==6.2.1
 google-api-python-client
 google-auth
+python-dotenv
 mypy==1.10.0
 pytest==8.2.0

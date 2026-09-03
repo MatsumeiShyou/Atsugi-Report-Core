@@ -6,6 +6,9 @@ from typing import Any, List, Callable
 from functools import wraps
 from datetime import datetime
 from dateutil.relativedelta import relativedelta # type: ignore
+from dotenv import load_dotenv # type: ignore
+
+load_dotenv()
 
 import pandas as pd
 import google.auth # type: ignore
