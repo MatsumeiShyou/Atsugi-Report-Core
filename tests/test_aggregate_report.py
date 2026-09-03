@@ -6,6 +6,7 @@ from typing import Any
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from aggregate_report import transform_raw_data, build_macro_report, build_micro_report
+from mapping_definitions import MICRO_ROW_MAP
 
 def test_transform_and_coordinate_mapping() -> None:
     data = {
@@ -44,6 +45,7 @@ def test_transform_and_coordinate_mapping() -> None:
     
     # Micro report (8-5)
     micro = build_micro_report(transformed)
-    # MICRO_ROW_MAP = {"青木商店": 5}
-    assert micro[5][5] == 900.0
-    assert micro[5][36] == 900.0
+    idx = MICRO_ROW_MAP.get("青木商店_①段ボール_自社回収")
+    assert idx is not None
+    assert micro[idx][5] == 900.0
+    assert micro[idx][36] == 900.0

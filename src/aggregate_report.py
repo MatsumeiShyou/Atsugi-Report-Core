@@ -56,9 +56,11 @@ def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
     
     for _, row in df.iterrows():
         supplier = row.get("集計用仕入先名", "")
+        cat = row.get("大品目分類", "")
+        route = row.get("経路分類", "")
         weight = row.get("実重量", 0.0)
         
-        row_idx = MICRO_ROW_MAP.get(supplier)
+        row_idx = MICRO_ROW_MAP.get(f"{supplier}_{cat}_{route}")
         if row_idx is not None:
             # F列(インデックス5)に1日のデータ
             current_val = grid[row_idx][5]
