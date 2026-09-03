@@ -3,12 +3,11 @@ import os
 import pandas as pd
 from typing import Any
 
-# srcディレクトリをPYTHONPATHに追加
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from aggregate_report import process_dataframe
+from aggregate_report import transform_raw_data, build_macro_report, build_micro_report
 
-def test_process_dataframe() -> None:
+def test_transform_and_coordinate_mapping() -> None:
     data = {
         "仕入先名": ["青木商店", "謎の業者", "富士営業所(横持)", "タチオカ商会", "アイダスト"],
         "品名": ["段ボール", "新聞", "雑誌", "段ボール(プレス)", "謎のゴミ"],
@@ -19,27 +18,32 @@ def test_process_dataframe() -> None:
     }
     df = pd.DataFrame(data)
     
-    result = process_dataframe(df)
+    # T1: Transform raw data
+    transformed = transform_raw_data(df)
     
-    # 1. 実重量の計算 (マイナスの調整重量により合算値が減算されるレコード)
-    assert result.loc[0, "実重量"] == 900
-    assert result.loc[3, "実重量"] == 2500
+    # Verify weights
+    assert transformed.loc[0, "実重量"] == 900
     
-    # 2. 横持ち拠点のレコード (状態・経路から除外されること)
-    assert result.loc[2, "横持フラグ"] == True
-    assert result.loc[2, "経路分類"] == "横持品"
+    # Verify categories and routing
+    assert transformed.loc[2, "横持フラグ"] == True
+    assert transformed.loc[2, "経路分類"] == "横持品"
+    assert transformed.loc[0, "集計用仕入先名"] == "青木商店"
+    assert transformed.loc[1, "集計用仕入先名"] == "そのた"
     
-    # 3. 主要顧客とそれ以外のレコード (後者が「そのた」に置換されること)
-    assert result.loc[0, "仕入先名"] == "青木商店"
-    assert result.loc[1, "仕入先名"] == "そのた"
-    assert result.loc[2, "仕入先名"] == "そのた" # MAJOR_CLIENTSにないため置換される
+    # T2: Build macro report (coordinate mapping)
+    macro = build_macro_report(transformed)
     
-    # 4. プレス品のレコード（経路分類が行われないこと）
-    assert result.loc[3, "状態分類"] == "プレス品"
-    assert result.loc[3, "経路分類"] == "-"
+    # MACRO_ROW_MAP = {"①段ボール_自社回収_青木商店": 2}
+    assert macro[2][0] == "青木商店"
+    assert macro[2][2] == 900.0
     
-    # 5. その他の検証
-    assert result.loc[0, "大品目分類"] == "①段ボール"
-    assert result.loc[0, "経路分類"] == "自社回収"
-    assert result.loc[4, "大品目分類"] == "⑤その他"
-    assert result.loc[4, "元品名"] == "謎のゴミ"
+    # MACRO_ROW_MAP = {"⑤その他_持込み_そのた": 168}
+    assert macro[168][0] == "そのた"
+    assert macro[168][1] == "謎のゴミ"
+    assert macro[168][2] == 100.0
+    
+    # Micro report (8-5)
+    micro = build_micro_report(transformed)
+    # MICRO_ROW_MAP = {"青木商店": 5}
+    assert micro[5][5] == 900.0
+    assert micro[5][36] == 900.0
