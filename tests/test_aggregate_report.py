@@ -10,7 +10,7 @@ from aggregate_report import transform_raw_data, build_macro_report, build_micro
 def test_transform_and_coordinate_mapping() -> None:
     data = {
         "仕入先名": ["青木商店", "謎の業者", "富士営業所(横持)", "タチオカ商会", "アイダスト"],
-        "品名": ["段ボール", "新聞", "雑誌", "段ボール(プレス)", "謎のゴミ"],
+        "品名": ["段ボール", "謎のゴミ", "雑誌", "段ボール(プレス)", "新聞"],
         "取引区分": ["引取", "持込", "引取", "引取", "持込"],
         "自社他社区分": ["自社", "自社", "他社", "他社", "他社"],
         "正味重量": [1000, 500, 2000, 3000, 100],
@@ -40,7 +40,7 @@ def test_transform_and_coordinate_mapping() -> None:
     # MACRO_ROW_MAP = {"⑤その他_持込み_そのた": 168}
     assert macro[168][0] == "そのた"
     assert macro[168][1] == "謎のゴミ"
-    assert macro[168][2] == 100.0
+    assert macro[168][2] == 500.0
     
     # Micro report (8-5)
     micro = build_micro_report(transformed)

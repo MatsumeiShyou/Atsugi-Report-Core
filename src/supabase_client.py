@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Any
+from typing import Any, cast
 import pandas as pd
 from supabase import create_client, Client # type: ignore
 
@@ -30,7 +30,7 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
     chunk_size = 1000
     for i in range(0, len(records), chunk_size):
         chunk = records[i:i + chunk_size]
-        client.table("raw_nyuka_data").insert(chunk).execute()
+        client.table("raw_nyuka_data").insert(cast(Any, chunk)).execute()
         
     logger.info(f"Supabaseへ {len(records)} 件のデータを保存しました ({source_file})")
 

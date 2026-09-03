@@ -60,7 +60,7 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
     """「8-5計」 346行 x 16列 の2次元配列を生成"""
-    grid = [["" for _ in range(16)] for _ in range(346)]
+    grid: List[List[Any]] = [["" for _ in range(16)] for _ in range(346)]
     
     for _, row in df.iterrows():
         cat = row.get("大品目分類", "")
@@ -83,7 +83,7 @@ def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
 
 def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
     """「8-5」 875行 x 41列 の2次元配列を生成"""
-    grid = [["" for _ in range(41)] for _ in range(875)]
+    grid: List[List[Any]] = [["" for _ in range(41)] for _ in range(875)]
     
     for _, row in df.iterrows():
         supplier = row.get("集計用仕入先名", "")
