@@ -22,6 +22,12 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
     df_copy = df.copy()
     df_copy["source_file"] = source_file
     
+    import re
+    bad_cols = [c for c in df_copy.columns if "かご引" in str(c) or "Unnamed" in str(c) or re.search(r'\.\d+$', str(c))]
+    if bad_cols:
+        logger.info(f"DBに存在しない不要な列を除外します: {bad_cols}")
+        df_copy = df_copy.drop(columns=bad_cols)
+        
     import numpy as np
     # NaNをNoneに確実へ置換するため object 型へ変換してから replace (JSONシリアライズ対応)
     df_copy = df_copy.astype(object).replace({np.nan: None})
