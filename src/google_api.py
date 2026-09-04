@@ -61,19 +61,26 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
     target_date = (today - relativedelta(months=13)).replace(day=1)
     target_date_str = target_date.strftime("%Y-%m-%dT00:00:00Z")
 
-    query = f"'{folder_id}' in parents and mimeType='text/csv' and modifiedTime >= '{target_date_str}' and trashed = false"
+    query = f"'{folder_id}' in parents and modifiedTime >= '{target_date_str}' and trashed = false"
     
     logger.info(f"Drive API検索クエリ: {query}")
-    results = service.files().list(q=query, fields="files(id, name)").execute()
+    results = service.files().list(
+        q=query, 
+        fields="files(id, name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
+    
     items = results.get("files", [])
+    csv_items = [item for item in items if item.get('name', '').lower().endswith('.csv')]
 
     dataframes: List[pd.DataFrame] = []
-    if not items:
+    if not csv_items:
         logger.info("対象のCSVファイルは見つかりませんでした。")
         return dataframes
 
     import io
-    for item in items:
+    for item in csv_items:
         file_id = item["id"]
         logger.info(f"ファイルダウンロード中: {item['name']}")
         request = service.files().get_media(fileId=file_id)
