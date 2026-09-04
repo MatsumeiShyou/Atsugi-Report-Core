@@ -30,10 +30,13 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
         # データが存在しない場合のフォールバック（テーブル定義済みの想定カラムリスト）
         valid_columns = {
             "id", "created_at", "source_file", 
-            "日付", "仕入先コード", "仕入先名", "品名コード", "品名", 
+            "transaction_date", "仕入先コード", "仕入先名", "品名コード", "品名", 
             "経路", "車番", "正味重量", "調整重量", "数量", 
             "単価", "金額", "備考", "受付時間", "伝票番号"
         }
+        
+    # CSV内の「年月日」列をSupabase側の必須列である「transaction_date」にリネーム
+    df_copy = df_copy.rename(columns={'年月日': 'transaction_date'})
         
     keep_cols = [col for col in df_copy.columns if str(col) in valid_columns]
     dropped_cols = [col for col in df_copy.columns if str(col) not in valid_columns]
