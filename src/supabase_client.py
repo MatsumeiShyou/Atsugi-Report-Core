@@ -35,6 +35,9 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
             "単価", "金額", "備考", "受付時間", "伝票番号"
         }
         
+    # CSVのヘッダーに含まれる全角・半角スペースを完全に除去
+    df_copy.columns = df_copy.columns.str.replace(r'\s+', '', regex=True)
+        
     # CSV内の「年月日」列をSupabase側の必須列である「transaction_date」にリネーム
     df_copy = df_copy.rename(columns={'年月日': 'transaction_date'})
         
