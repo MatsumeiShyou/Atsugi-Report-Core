@@ -36,4 +36,6 @@ jobs:
         env:
           FOLDER_ID: ${{ secrets.FOLDER_ID }}
           TARGET_SPREADSHEET_ID: ${{ secrets.TARGET_SPREADSHEET_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python src/main.py

@@ -22,8 +22,7 @@ def main() -> None:
     logger.info("DriveからCSVを取得します...")
     dataframes = fetch_csv_from_drive()
     if not dataframes:
-        logger.warning("対象データなし")
-        return
+        raise ValueError("Google Driveから対象のCSVデータが1件も取得できませんでした。")
 
     # [L] Load to DB (raw_nyuka_data)
     logger.info("Supabaseへ生データを保存します...")
@@ -31,20 +30,11 @@ def main() -> None:
     if "source_file" not in combined_raw.columns:
         combined_raw["source_file"] = "drive_import_13months.csv"
         
-    try:
-        load_to_db(combined_raw, source_file="drive_import_13months.csv")
-    except Exception as e:
-        logger.error(f"Supabaseへの保存に失敗しました: {e}")
-        # 環境変数が無いローカルテスト時などは続行
-        logger.info("Supabaseをスキップしてメモリ内のデータを使用します。")
+    load_to_db(combined_raw, source_file="drive_import_13months.csv")
 
     # [T] Transform
     logger.info("Supabaseからデータを抽出し、変換処理を行います...")
-    try:
-        raw_df = extract_from_db()
-    except Exception as e:
-        logger.warning(f"Supabaseからの抽出に失敗したため、インメモリのデータを使用します: {e}")
-        raw_df = combined_raw
+    raw_df = extract_from_db()
         
     transformed_df = transform_raw_data(raw_df)
     

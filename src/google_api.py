@@ -89,6 +89,7 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
             dataframes.append(df)
         except Exception as e:
             logger.error(f"ファイル {item['name']} の読み込みに失敗しました: {e}")
+            raise
             
     return dataframes
 
