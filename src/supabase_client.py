@@ -22,11 +22,26 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
     df_copy = df.copy()
     df_copy["source_file"] = source_file
     
-    import re
-    bad_cols = [c for c in df_copy.columns if "かご引" in str(c) or "Unnamed" in str(c) or re.search(r'\.\d+$', str(c))]
-    if bad_cols:
-        logger.info(f"DBに存在しない不要な列を除外します: {bad_cols}")
-        df_copy = df_copy.drop(columns=bad_cols)
+    # ホワイトリスト方式でスキーマ（有効な列名一覧）を動的に取得
+    schema_res = client.table("raw_nyuka_data").select("*").limit(1).execute()
+    if schema_res.data:
+        valid_columns = set(schema_res.data[0].keys())
+    else:
+        # データが存在しない場合のフォールバック（テーブル定義済みの想定カラムリスト）
+        valid_columns = {
+            "id", "created_at", "source_file", 
+            "日付", "仕入先コード", "仕入先名", "品名コード", "品名", 
+            "経路", "車番", "正味重量", "調整重量", "数量", 
+            "単価", "金額", "備考", "受付時間", "伝票番号"
+        }
+        
+    keep_cols = [col for col in df_copy.columns if str(col) in valid_columns]
+    dropped_cols = [col for col in df_copy.columns if str(col) not in valid_columns]
+    
+    if dropped_cols:
+        logger.info(f"DBに存在しない不要な列（ホワイトリスト外）を除外します: {dropped_cols}")
+        
+    df_copy = df_copy[keep_cols]
         
     import numpy as np
     # NaNをNoneに確実へ置換するため object 型へ変換してから replace (JSONシリアライズ対応)
