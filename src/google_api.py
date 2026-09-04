@@ -104,7 +104,7 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
         fh.seek(0)
         
         try:
-            df = pd.read_csv(fh)
+            df = pd.read_csv(fh, encoding='cp932')
             dataframes.append(df)
         except Exception as e:
             logger.error(f"ファイル {item['name']} の読み込みに失敗しました: {e}")
