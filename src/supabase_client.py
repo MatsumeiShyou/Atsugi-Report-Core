@@ -22,8 +22,9 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
     df_copy = df.copy()
     df_copy["source_file"] = source_file
     
-    # NaNをNoneに置換 (JSONシリアライズ対応)
-    df_copy = df_copy.where(pd.notnull(df_copy), None)
+    import numpy as np
+    # NaNをNoneに確実へ置換するため object 型へ変換してから replace (JSONシリアライズ対応)
+    df_copy = df_copy.astype(object).replace({np.nan: None})
     
     records = df_copy.to_dict(orient="records")
     
