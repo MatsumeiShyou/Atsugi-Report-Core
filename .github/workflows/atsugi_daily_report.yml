@@ -34,8 +34,8 @@ jobs:
 
       - name: Run script
         env:
-          FOLDER_ID: ${{ secrets.FOLDER_ID }}
-          TARGET_SPREADSHEET_ID: ${{ secrets.TARGET_SPREADSHEET_ID }}
+          TARGET_FOLDER_ID: ${{ vars.TARGET_FOLDER_ID }}
+          TARGET_SPREADSHEET_ID: ${{ vars.TARGET_SPREADSHEET_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python src/main.py
