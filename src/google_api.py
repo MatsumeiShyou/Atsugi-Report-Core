@@ -66,12 +66,24 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
     logger.info(f"Drive API検索クエリ: {query}")
     results = service.files().list(
         q=query, 
-        fields="files(id, name)",
+        fields="files(id, name, mimeType)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
     ).execute()
     
     items = results.get("files", [])
+    logger.info(f"APIから取得した生のファイル件数: {len(items)}")
+    for item in items:
+        logger.info(f"取得ファイル - 名前: {item.get('name')}, MIMEタイプ: {item.get('mimeType')}")
+        
+    if len(items) == 0:
+        logger.info("取得件数が0件のため、親フォルダへのアクセス可否をテストします...")
+        try:
+            folder_info = service.files().get(fileId='1-0bvWQDYrJEWZTglQ5R_zwgjazHUFhRO', supportsAllDrives=True).execute()
+            logger.info(f"親フォルダ情報: {folder_info}")
+        except Exception as e:
+            logger.error(f"親フォルダへのアクセスに失敗しました: {e}")
+
     csv_items = [item for item in items if item.get('name', '').lower().endswith('.csv')]
 
     dataframes: List[pd.DataFrame] = []
