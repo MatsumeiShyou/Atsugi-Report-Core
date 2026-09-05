@@ -328,7 +328,9 @@ def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
                     r_data[1] = keys[1] # 客先名称
                     r_data[2] = keys[2] # 運搬業者
                     r_data[3] = keys[3] # 品名
-                    r_data[4] = route_disp
+                    
+                    # E列(index 4)の表示区分マッピング（「持込」以外はすべて「引取」）
+                    r_data[4] = "持込" if "持込" in route_disp else "引取"
                     
                     row_total = 0.0
                     day_sums = supp_df.groupby("_day")["実重量"].sum()
