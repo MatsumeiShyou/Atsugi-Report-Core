@@ -32,8 +32,8 @@ import unicodedata
 def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     # 文字列カラムの表記揺れ（全角半角スペース除去、NFKC正規化）を処理
     for col in df.select_dtypes(include=['object', 'string']).columns:
-        df[col] = df[col].astype(str).apply(
-            lambda x: unicodedata.normalize('NFKC', x).replace(" ", "").replace("　", "") if x not in ["None", "nan", ""] else x
+        df[col] = df[col].apply(
+            lambda x: unicodedata.normalize('NFKC', x).replace(" ", "").replace("　", "") if isinstance(x, str) else x
         )
         
     df["実重量"] = df["正味重量"].fillna(0) + df["調整重量"].fillna(0)
