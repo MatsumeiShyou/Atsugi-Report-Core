@@ -5,7 +5,11 @@ on:
     # 毎日UTC 15:00 (JST 0:00)
     - cron: '0 15 * * *'
   workflow_dispatch:
-
+    inputs:
+      target_yyyymm:
+        description: '対象年月 (例: 2026-05)。未指定の場合は最新データから自動判定。'
+        required: false
+        type: string
 permissions:
   contents: read
   id-token: write
@@ -38,4 +42,5 @@ jobs:
           TARGET_SPREADSHEET_ID: ${{ vars.TARGET_SPREADSHEET_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TARGET_YYYYMM: ${{ github.event.inputs.target_yyyymm }}
         run: python src/main.py
