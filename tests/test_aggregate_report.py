@@ -37,5 +37,13 @@ def test_transform_and_coordinate_mapping() -> None:
     
     idx_aoki_micro = _find_micro_idx("青木商店", "①段ボール", "持込み")
     assert idx_aoki_micro != -1
-    # 日付指定がないのでday_idxは-1（マッピングされず行合計のみ加算される）
-    assert micro[idx_aoki_micro - 1][31] == 900.0
+    
+    # A~E列の属性テキストの検証
+    assert micro[idx_aoki_micro - 1][1] == "青木商店" # B列
+    assert micro[idx_aoki_micro - 1][3] == "段ボール" # D列
+    assert micro[idx_aoki_micro - 1][4] == "持込み"    # E列
+    
+    # 日付から算出したインデックスの検証 (Day 1はindex 5)
+    assert micro[idx_aoki_micro - 1][5] == 900.0
+    # 行合計はindex 36
+    assert micro[idx_aoki_micro - 1][36] == 900.0

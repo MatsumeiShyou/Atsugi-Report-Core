@@ -169,9 +169,9 @@ def _find_micro_idx(supplier: str, cat: str, route: str) -> int:
     return -1
 
 def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
-    # 8-5: F〜AK列（32列分）。F=Day1(0), AJ=Day31(30), AK=Total(31)
+    # 8-5: A〜AK列（37列分）。A~E(0~4)は属性テキスト、F(5)=Day1, AJ(35)=Day31, AK(36)=Total
     # 値が存在しないセルは None を設定し、gspread更新時に無視させる
-    grid: List[List[Any]] = [[None for _ in range(32)] for _ in range(875)]
+    grid: List[List[Any]] = [[None for _ in range(37)] for _ in range(875)]
     
     if "transaction_date" in df.columns:
         df["_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
@@ -189,22 +189,37 @@ def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
         if idx != -1 and 1 <= idx <= 875:
             row_idx = idx - 1
             
+            # 属性テキストの配置 (A〜E列)
+            if grid[row_idx][0] is None:
+                grid[row_idx][0] = row.get("管理会社", "")
+            if grid[row_idx][1] is None:
+                grid[row_idx][1] = supplier
+            if grid[row_idx][2] is None:
+                grid[row_idx][2] = row.get("運搬業者", "")
+            if grid[row_idx][3] is None:
+                # テンプレートにある品名（「段ボール・バラ」など）を出力
+                # 生データに存在しない場合は大品目分類をフォールバックとして使用
+                raw_item = str(row.get("品名", ""))
+                grid[row_idx][3] = raw_item if raw_item else cat
+            if grid[row_idx][4] is None:
+                grid[row_idx][4] = route
+            
             # 日付から列インデックスを特定
             day_idx = -1
             if pd.notna(date_val):
                 day = date_val.day
                 if 1 <= day <= 31:
-                    day_idx = day - 1
+                    day_idx = day + 4 # F列(5)が1日
             
-            # 日別実績の加算 (Day 1 = index 0)
+            # 日別実績の加算
             if day_idx != -1:
                 current_val = grid[row_idx][day_idx]
                 if current_val is None: current_val = 0.0
                 grid[row_idx][day_idx] = float(current_val) + float(weight)
             
-            # 行合計の加算 (AK = index 31)
-            total_val = grid[row_idx][31]
+            # 行合計の加算 (AK = index 36)
+            total_val = grid[row_idx][36]
             if total_val is None: total_val = 0.0
-            grid[row_idx][31] = float(total_val) + float(weight)
+            grid[row_idx][36] = float(total_val) + float(weight)
             
     return grid
