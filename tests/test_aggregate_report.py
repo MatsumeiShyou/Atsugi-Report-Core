@@ -27,10 +27,10 @@ def test_transform_and_coordinate_mapping() -> None:
     # マクロレポートで青木商店を探す
     found_macro_aoki = False
     for row in macro:
-        if row[0] == "青木商店" and row[1] == "段ボール":
+        if row[0] == "" and row[1] == "青木商店":
             # C列 (index 2) が月別データ
-            assert row[2] == 900.0
-            assert row[15] == 900.0 # 行合計
+            assert row[2] == "900"
+            assert row[15] == "900" # 行合計
             found_macro_aoki = True
             break
     assert found_macro_aoki
@@ -40,12 +40,12 @@ def test_transform_and_coordinate_mapping() -> None:
     # ミクロレポートで青木商店を探す
     found_micro_aoki = False
     for row in micro:
-        if row[1] == "青木商店" and row[4] == "持込み":
+        if len(row) > 36 and row[1] == "青木商店" and row[4] == "持込":
             assert row[3] == "段ボール"
             # Day 1 は F列 (index 5)
-            assert row[5] == 900.0
+            assert row[5] == "900"
             # 行合計は AK列 (index 36)
-            assert row[36] == 900.0
+            assert row[36] == "900"
             found_micro_aoki = True
             break
     assert found_micro_aoki
