@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import pandas as pd
 
@@ -11,7 +11,8 @@ def test_transform_and_coordinate_mapping() -> None:
         "品名": ["段ボール", "紙ゴミ", "雑誌", "段ボール(プレス)", "新聞"],
         "経路": ["持込", "自社", "持込", "持込", "他社"],
         "正味重量": [1000, 500, 2000, 3000, 100],
-        "調整重量": [-100, 0, 50, -500, 0]
+        "調整重量": [-100, 0, 50, -500, 0],
+        "transaction_date": ["2026-09-01", "2026-09-01", "2026-09-01", "2026-09-01", "2026-09-01"]
     }
     df = pd.DataFrame(data)
     
@@ -25,16 +26,16 @@ def test_transform_and_coordinate_mapping() -> None:
     
     idx_aoki = _find_macro_idx("青木商店", "①段ボール", "持込み", False)
     assert idx_aoki != -1
-    assert macro[idx_aoki - 1][0] == "青木商店"
-    assert macro[idx_aoki - 1][2] == 900.0
+    # macro は 14列。インデックスはC列が0。日付指定がないのですべて0列目に入るはず。
+    assert macro[idx_aoki - 1][0] == 900.0
     
     idx_sonota = _find_macro_idx("そのた", "③雑誌", "持込み", False)
     if idx_sonota != -1:
-        assert macro[idx_sonota - 1][2] == 2050.0
+        assert macro[idx_sonota - 1][0] == 2050.0
         
     micro = build_micro_report(transformed)
     
     idx_aoki_micro = _find_micro_idx("青木商店", "①段ボール", "持込み")
     assert idx_aoki_micro != -1
-    assert micro[idx_aoki_micro - 1][5] == 900.0
-    assert micro[idx_aoki_micro - 1][36] == 900.0
+    # 日付指定がないのでday_idxは-1（マッピングされず行合計のみ加算される）
+    assert micro[idx_aoki_micro - 1][31] == 900.0

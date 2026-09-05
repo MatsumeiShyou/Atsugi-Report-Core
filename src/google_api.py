@@ -113,8 +113,8 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
     return dataframes
 
 @exponential_backoff_with_jitter(max_retries=3)
-def write_to_sheets(df: pd.DataFrame, sheet_name: str = "集計結果") -> None:
-    """集計済みDataFrameをスプレッドシートに一括書き込みする"""
+def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1) -> None:
+    """集計済みDataFrameをスプレッドシートに部分書き込み（非破壊）する"""
     spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
     if not spreadsheet_id:
         raise ValueError("環境変数 TARGET_SPREADSHEET_ID が設定されていません。")
@@ -122,9 +122,6 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str = "集計結果") -> None:
     creds = get_credentials()
     gc = gspread.authorize(creds)
     
-    # JSONで書き込むため、NaNを空文字に置換
-    df = df.fillna("")
-
     logger.info(f"スプレッドシート {spreadsheet_id} を開きます。")
     sh = gc.open_by_key(spreadsheet_id)
     
@@ -133,14 +130,22 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str = "集計結果") -> None:
     except Exception as e:
         if "WorksheetNotFound" in str(type(e).__name__):
             logger.info(f"シート '{sheet_name}' が見つからないため作成します。")
-            wks = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
+            wks = sh.add_worksheet(title=sheet_name, rows=1000, cols=40)
         else:
             raise
 
-    # DataFrameのヘッダーとデータをリスト形式に変換
-    data = [df.columns.values.tolist()] + df.values.tolist()
-    
-    logger.info(f"シート '{sheet_name}' に {len(data)} 行書き込みます...")
-    wks.clear()
-    wks.update(values=data, range_name="A1")
-    logger.info("書き込みが完了しました。")
+    # テンプレート（見出し・数式）を破壊しないよう、Noneでない値のみを gspread.Cell に変換
+    cells = []
+    grid = df.values.tolist()
+    for r_idx, row in enumerate(grid):
+        for c_idx, val in enumerate(row):
+            if pd.notna(val) and val is not None:
+                # 行は 1-indexed（r_idx+1）、列は start_col から開始
+                cells.append(gspread.Cell(r_idx + 1, c_idx + start_col, val))
+                
+    if cells:
+        logger.info(f"シート '{sheet_name}' に {len(cells)} セルを部分書き込みします...")
+        wks.update_cells(cells, value_input_option='USER_ENTERED')
+        logger.info("書き込みが完了しました。")
+    else:
+        logger.info(f"シート '{sheet_name}' に書き込むデータがありませんでした。")

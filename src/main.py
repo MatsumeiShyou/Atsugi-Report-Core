@@ -46,8 +46,10 @@ def main() -> None:
 
     # [L] Load to Sheets
     logger.info("整形済みデータをスプレッドシートへ出力します...")
-    write_to_sheets(macro_df, sheet_name="8-5計")
-    write_to_sheets(micro_df, sheet_name="8-5")
+    # 8-5計は C列(3) から出力
+    write_to_sheets(macro_df, sheet_name="8-5計", start_col=3)
+    # 8-5 は F列(6) から出力
+    write_to_sheets(micro_df, sheet_name="8-5", start_col=6)
 
     logger.info("ETL パイプラインが完了しました。")
 
