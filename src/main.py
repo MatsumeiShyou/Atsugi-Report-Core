@@ -46,8 +46,8 @@ def main() -> None:
 
     # [L] Load to Sheets
     logger.info("整形済みデータをスプレッドシートへ出力します...")
-    # 8-5計は C列(3) から出力
-    write_to_sheets(macro_df, sheet_name="8-5計", start_col=3)
+    # 8-5計は A列(1) から出力（属性テキストを含むため）
+    write_to_sheets(macro_df, sheet_name="8-5計", start_col=1)
     # 8-5 は A列(1) から出力（属性テキストを含むため）
     write_to_sheets(micro_df, sheet_name="8-5", start_col=1)
 

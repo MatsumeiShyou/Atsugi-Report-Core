@@ -3,7 +3,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-from aggregate_report import transform_raw_data, build_macro_report, build_micro_report, _find_macro_idx, _find_micro_idx
+from aggregate_report import transform_raw_data, build_macro_report, build_micro_report
 
 def test_transform_and_coordinate_mapping() -> None:
     data = {
@@ -24,26 +24,28 @@ def test_transform_and_coordinate_mapping() -> None:
     
     macro = build_macro_report(transformed)
     
-    idx_aoki = _find_macro_idx("青木商店", "①段ボール", "持込み", False)
-    assert idx_aoki != -1
-    # macro は 14列。インデックスはC列が0。日付指定がないのですべて0列目に入るはず。
-    assert macro[idx_aoki - 1][0] == 900.0
+    # マクロレポートで青木商店を探す
+    found_macro_aoki = False
+    for row in macro:
+        if row[0] == "青木商店" and row[1] == "段ボール":
+            # C列 (index 2) が月別データ
+            assert row[2] == 900.0
+            assert row[15] == 900.0 # 行合計
+            found_macro_aoki = True
+            break
+    assert found_macro_aoki
     
-    idx_sonota = _find_macro_idx("そのた", "③雑誌", "持込み", False)
-    if idx_sonota != -1:
-        assert macro[idx_sonota - 1][0] == 2050.0
-        
     micro = build_micro_report(transformed)
     
-    idx_aoki_micro = _find_micro_idx("青木商店", "①段ボール", "持込み")
-    assert idx_aoki_micro != -1
-    
-    # A~E列の属性テキストの検証
-    assert micro[idx_aoki_micro - 1][1] == "青木商店" # B列
-    assert micro[idx_aoki_micro - 1][3] == "段ボール" # D列
-    assert micro[idx_aoki_micro - 1][4] == "持込み"    # E列
-    
-    # 日付から算出したインデックスの検証 (Day 1はindex 5)
-    assert micro[idx_aoki_micro - 1][5] == 900.0
-    # 行合計はindex 36
-    assert micro[idx_aoki_micro - 1][36] == 900.0
+    # ミクロレポートで青木商店を探す
+    found_micro_aoki = False
+    for row in micro:
+        if row[1] == "青木商店" and row[4] == "持込み":
+            assert row[3] == "段ボール"
+            # Day 1 は F列 (index 5)
+            assert row[5] == 900.0
+            # 行合計は AK列 (index 36)
+            assert row[36] == 900.0
+            found_micro_aoki = True
+            break
+    assert found_micro_aoki

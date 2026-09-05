@@ -1,7 +1,7 @@
 import pandas as pd
 from typing import List, Any
 import logging
-from mapping_definitions import MACRO_ROW_MAP, MICRO_ROW_MAP
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +70,11 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         
     df["大品目分類"] = df["品名"].apply(map_category)
     
+    # MAJOR_CLIENTS を長い順にソートして、部分一致の誤爆を防ぐ
+    sorted_clients = sorted(list(MAJOR_CLIENTS), key=len, reverse=True)
     def clean_supplier(x):
         s = str(x)
-        for client in MAJOR_CLIENTS:
+        for client in sorted_clients:
             if client in s:
                 return client
         return "そのた"
@@ -81,33 +83,9 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-def _find_macro_idx(supplier: str, cat: str, route: str, is_yokomochi: bool) -> int:
-    if is_yokomochi:
-        for k, v in MACRO_ROW_MAP.items():
-            if "横持品" in k and supplier in k:
-                return v
-        return -1
-        
-    route_kw = ""
-    if "持込" in route: route_kw = "持込"
-    elif "自社" in route or "他社" in route or "引取" in route: route_kw = "引取"
-    elif "プレス" in route: route_kw = "プレス"
-    
-    for k, v in MACRO_ROW_MAP.items():
-        if supplier in k and cat in k and route_kw in k:
-            return v
-            
-    # fallback without route_kw (e.g. for そのた)
-    for k, v in MACRO_ROW_MAP.items():
-        if supplier in k and cat in k:
-            return v
-            
-    return -1
-
 def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
-    # 8-5計: C〜P列（14列分）。C=0, O=12(13ヶ月分), P=13(比較用)
-    # 値が存在しないセルは None
-    grid: List[List[Any]] = [[None for _ in range(14)] for _ in range(346)]
+    # 8-5計: A〜P列（16列分）。A=階層見出し, B=補足, C(2)〜O(14)=月別, P(15)=合計
+    grid: List[List[Any]] = []
     
     if "transaction_date" in df.columns:
         df["_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
@@ -117,109 +95,131 @@ def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
         df["_ym"] = pd.NaT
         
     unique_yms = sorted([ym for ym in df["_ym"].unique() if pd.notna(ym)])
-    # 最新13ヶ月に制限
     if len(unique_yms) > 13:
         unique_yms = unique_yms[-13:]
         
-    ym_to_col = {ym: i for i, ym in enumerate(unique_yms)}
+    ym_to_col = {ym: (i + 2) for i, ym in enumerate(unique_yms)}
     
-    for _, row in df.iterrows():
-        supplier = row.get("集計用仕入先名", "")
-        cat = row.get("大品目分類", "")
-        route = row.get("経路分類", "")
-        weight = row.get("実重量", 0.0)
-        is_yokomochi = row.get("横持フラグ", False)
-        ym_val = row.get("_ym")
+    # 見出し行を追加
+    top_header = [None] * 16
+    for ym, col_idx in ym_to_col.items():
+        top_header[col_idx] = str(ym)
+    top_header[15] = "合計"
+    grid.append(top_header)
+    
+    categories = sorted(df["大品目分類"].dropna().unique())
+    
+    for cat in categories:
+        cat_df = df[df["大品目分類"] == cat]
+        routes = sorted(cat_df["経路分類"].dropna().unique())
         
-        idx = _find_macro_idx(supplier, cat, route, is_yokomochi)
-        
-        if idx != -1 and 1 <= idx <= 346:
-            row_idx = idx - 1 # 0-indexed
+        for route in routes:
+            route_df = cat_df[cat_df["経路分類"] == route]
             
-            col_idx = ym_to_col.get(ym_val, -1) if pd.notna(ym_val) else -1
-            if col_idx != -1:
-                current_val = grid[row_idx][col_idx]
-                if current_val is None: current_val = 0.0
-                grid[row_idx][col_idx] = float(current_val) + float(weight)
+            # 見出し行 (Category - Route)
+            header = [None] * 16
+            header[0] = f"{cat} - {route}"
+            grid.append(header)
+            
+            route_totals = [0.0] * 14 # 13 months + total
+            
+            suppliers = sorted(route_df["集計用仕入先名"].dropna().unique())
+            for supplier in suppliers:
+                supp_df = route_df[route_df["集計用仕入先名"] == supplier]
+                row_data = [None] * 16
+                
+                row_data[0] = supplier
+                raw_item = str(supp_df.iloc[0].get("品名", ""))
+                row_data[1] = raw_item if raw_item else cat
+                
+                ym_sums = supp_df.groupby("_ym")["実重量"].sum()
+                row_total = 0.0
+                for ym, weight in ym_sums.items():
+                    if ym in ym_to_col:
+                        c_idx = ym_to_col[ym]
+                        row_data[c_idx] = float(weight)
+                        row_total += float(weight)
+                        route_totals[c_idx - 2] += float(weight)
+                
+                row_data[15] = row_total
+                route_totals[13] += row_total
+                grid.append(row_data)
+                
+            # 小計行
+            subtotal = [None] * 16
+            subtotal[0] = f"{route} 合計"
+            for i in range(13):
+                if route_totals[i] > 0:
+                    subtotal[i + 2] = route_totals[i]
+            subtotal[15] = route_totals[13]
+            grid.append(subtotal)
+            
+            grid.append([None] * 16) # 空行
             
     return grid
 
-def _find_micro_idx(supplier: str, cat: str, route: str) -> int:
-    route_kw = ""
-    if "持込" in route: route_kw = "持込"
-    elif "自社" in route or "他社" in route or "引取" in route: route_kw = "引取"
-    
-    cat_clean = cat.replace("①", "").replace("②", "").replace("③", "").replace("④", "").replace("⑤", "")
-    
-    # Try exact match first
-    for k, v in MICRO_ROW_MAP.items():
-        if supplier in k and cat_clean in k and route_kw in k:
-            return v
-            
-    # Try just supplier and route
-    for k, v in MICRO_ROW_MAP.items():
-        if supplier in k and route_kw in k:
-            return v
-            
-    # Try just supplier
-    for k, v in MICRO_ROW_MAP.items():
-        if supplier in k:
-            return v
-            
-    return -1
-
 def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
     # 8-5: A〜AK列（37列分）。A~E(0~4)は属性テキスト、F(5)=Day1, AJ(35)=Day31, AK(36)=Total
-    # 値が存在しないセルは None を設定し、gspread更新時に無視させる
-    grid: List[List[Any]] = [[None for _ in range(37)] for _ in range(875)]
+    grid: List[List[Any]] = []
     
     if "transaction_date" in df.columns:
         df["_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
+        df["_day"] = df["_date"].dt.day
     else:
         df["_date"] = pd.NaT
+        df["_day"] = pd.NaT
         
-    for _, row in df.iterrows():
-        supplier = row.get("集計用仕入先名", "")
-        cat = row.get("大品目分類", "")
-        route = row.get("経路分類", "")
-        weight = row.get("実重量", 0.0)
-        date_val = row.get("_date")
+    categories = sorted(df["大品目分類"].dropna().unique())
+    
+    for cat in categories:
+        cat_df = df[df["大品目分類"] == cat]
+        routes = sorted(cat_df["経路分類"].dropna().unique())
         
-        idx = _find_micro_idx(supplier, cat, route)
-        if idx != -1 and 1 <= idx <= 875:
-            row_idx = idx - 1
+        for route in routes:
+            route_df = cat_df[cat_df["経路分類"] == route]
             
-            # 属性テキストの配置 (A〜E列)
-            if grid[row_idx][0] is None:
-                grid[row_idx][0] = row.get("管理会社", "")
-            if grid[row_idx][1] is None:
-                grid[row_idx][1] = supplier
-            if grid[row_idx][2] is None:
-                grid[row_idx][2] = row.get("運搬業者", "")
-            if grid[row_idx][3] is None:
-                # テンプレートにある品名（「段ボール・バラ」など）を出力
-                # 生データに存在しない場合は大品目分類をフォールバックとして使用
-                raw_item = str(row.get("品名", ""))
-                grid[row_idx][3] = raw_item if raw_item else cat
-            if grid[row_idx][4] is None:
-                grid[row_idx][4] = route
+            # 見出し行 (Category - Route)
+            header = [None] * 37
+            header[1] = f"{cat} - {route}"
+            grid.append(header)
             
-            # 日付から列インデックスを特定
-            day_idx = -1
-            if pd.notna(date_val):
-                day = date_val.day
-                if 1 <= day <= 31:
-                    day_idx = day + 4 # F列(5)が1日
+            route_totals = [0.0] * 32
             
-            # 日別実績の加算
-            if day_idx != -1:
-                current_val = grid[row_idx][day_idx]
-                if current_val is None: current_val = 0.0
-                grid[row_idx][day_idx] = float(current_val) + float(weight)
+            suppliers = sorted(route_df["集計用仕入先名"].dropna().unique())
+            for supplier in suppliers:
+                supp_df = route_df[route_df["集計用仕入先名"] == supplier]
+                row_data = [None] * 37
+                
+                first = supp_df.iloc[0]
+                row_data[0] = first.get("管理会社", "")
+                row_data[1] = supplier
+                row_data[2] = first.get("運搬業者", "")
+                raw_item = str(first.get("品名", ""))
+                row_data[3] = raw_item if raw_item else cat
+                row_data[4] = route
+                
+                day_sums = supp_df.groupby("_day")["実重量"].sum()
+                row_total = 0.0
+                for day, weight in day_sums.items():
+                    if pd.notna(day) and 1 <= day <= 31:
+                        c_idx = int(day) + 4
+                        row_data[c_idx] = float(weight)
+                        row_total += float(weight)
+                        route_totals[int(day) - 1] += float(weight)
+                
+                row_data[36] = row_total
+                route_totals[31] += row_total
+                grid.append(row_data)
+                
+            # 小計行
+            subtotal = [None] * 37
+            subtotal[1] = f"{route} 合計"
+            for d in range(31):
+                if route_totals[d] > 0:
+                    subtotal[d + 5] = route_totals[d]
+            subtotal[36] = route_totals[31]
+            grid.append(subtotal)
             
-            # 行合計の加算 (AK = index 36)
-            total_val = grid[row_idx][36]
-            if total_val is None: total_val = 0.0
-            grid[row_idx][36] = float(total_val) + float(weight)
+            grid.append([None] * 37) # 空行
             
     return grid
