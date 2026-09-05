@@ -26,6 +26,7 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         item_name = str(row.get("品名", ""))
         inout = str(row.get("自社他社区分", ""))
         customer = str(row.get("得意先名", ""))
+        transaction_type = str(row.get("取引区分", ""))
         
         # 出荷データの判定（得意先名が存在するなら出荷）
         if pd.notna(row.get("得意先名")) and customer.strip() not in ["", "None", "nan"]:
@@ -35,6 +36,9 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
 
         if "プレス" in item_name:
             return "プレス品"
+            
+        if "持込" in transaction_type:
+            return "持込み"
             
         if "自社" in inout:
             return "自社回収"
