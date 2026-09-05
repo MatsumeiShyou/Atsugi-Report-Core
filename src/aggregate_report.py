@@ -240,22 +240,33 @@ def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
             
     return grid
 
-def build_micro_report(df: pd.DataFrame) -> List[List[Any]]:
+def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: int = None) -> List[List[Any]]:
     grid: List[List[Any]] = []
     
     if "transaction_date" in df.columns:
         df["_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
         df["_day"] = df["_date"].dt.day
+        df["_year"] = df["_date"].dt.year
+        df["_month"] = df["_date"].dt.month
     else:
         df["_date"] = pd.NaT
         df["_day"] = pd.NaT
+        df["_year"] = pd.NaT
+        df["_month"] = pd.NaT
         
     valid_dates = df["_date"].dropna()
-    year, month = 2026, 5
-    if not valid_dates.empty:
-        mode_date = valid_dates.dt.to_period("M").mode()
-        if not mode_date.empty:
-            year, month = mode_date.iloc[0].year, mode_date.iloc[0].month
+    year, month = target_year, target_month
+    
+    if year is None or month is None:
+        year, month = 2026, 5
+        if not valid_dates.empty:
+            mode_date = valid_dates.dt.to_period("M").mode()
+            if not mode_date.empty:
+                year, month = mode_date.iloc[0].year, mode_date.iloc[0].month
+                
+    # 指定された年月のデータのみにフィルタリング
+    if not df.empty and "_year" in df.columns:
+        df = df[(df["_year"] == year) & (df["_month"] == month)].copy()
             
     # Top Header 行 1
     row0 = [None] * 41
