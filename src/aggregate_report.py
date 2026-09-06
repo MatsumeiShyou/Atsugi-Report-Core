@@ -1,34 +1,64 @@
 import pandas as pd
-from typing import List, Any
+from typing import List, Any, Union, cast, Tuple, Optional
 import logging
 import unicodedata
 import datetime
+
+# --- 動的に MAJOR_CLIENTS を取得（テンプレート由来） ---
+from mapping_definitions import MICRO_ROW_MAP
+MAJOR_CLIENTS = set()
+for k in MICRO_ROW_MAP.keys():
+    if not any(x in k for x in ['そのた', '合計', 'HEADER', '＜', 'プレス', '⑤その他']):
+        MAJOR_CLIENTS.add(k.split('_')[0])
+# ---------------------------------------------------
 
 logger = logging.getLogger(__name__)
 
 YOKOMOCHI_KEYWORDS = ["富士", "浜松", "御殿場", "(横持)"]
 
+# 新しいマッピングの追加
 ITEM_TO_CATEGORY = {
-    "段ボール": "①段ボール", "新聞": "②新聞", "雑誌": "③雑誌", "PETボトル": "④プラ類", "その他": "⑤その他"
+    "段ボール": "①段ボール", "新聞": "②新聞", "雑誌": "③雑誌", 
+    "PETボトル": "④プラ類", "ストレッチフィルム": "④プラ類", "シュリンクフィルム": "④プラ類", 
+    "PPバンド": "④プラ類", "廃プラ軟質": "④プラ類", "プラスチックパレット": "④プラ類",
+    "牛乳パック": "⑤その他", "雑古紙": "⑤その他", "雑がみ": "⑤その他", "ウエス": "⑤その他", 
+    "台紙": "⑤その他", "模造": "⑤その他", "クラフト": "⑤その他", "窓付廃紙": "⑤その他", 
+    "上白": "⑤その他", "紙パック": "⑤その他", "紙管": "⑤その他", "その他": "⑤その他"
 }
 
 def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
-    # 文字列カラムの表記揺れ（全角半角スペース除去、NFKC正規化）を処理
     for col in df.select_dtypes(include=['object', 'string']).columns:
         df[col] = df[col].apply(
             lambda x: unicodedata.normalize('NFKC', x).replace(" ", "").replace("　", "") if isinstance(x, str) else x
         )
         
+    import json
+    import os
+    alias_file = os.path.join(os.path.dirname(__file__), "..", "item_aliases.json")
+    if os.path.exists(alias_file):
+        try:
+            with open(alias_file, "r", encoding="utf-8") as f:
+                aliases = json.load(f)
+            for alias in aliases:
+                client_cond = alias.get("client_contains")
+                item_cond = alias.get("item_in")
+                replace_with = alias.get("replace_with")
+                if client_cond and item_cond and replace_with:
+                    mask_client = df["仕入先名"].astype(str).str.contains(client_cond) | df["支払先名"].astype(str).str.contains(client_cond)
+                    mask_item = df["品名"].astype(str).isin(item_cond)
+                    df.loc[mask_client & mask_item, "品名"] = replace_with
+        except Exception as e:
+            print(f"Warning: Failed to apply item_aliases.json: {e}")
+        
     df["実重量"] = df["正味重量"].fillna(0) + df["調整重量"].fillna(0)
     df["横持フラグ"] = df["仕入先名"].apply(lambda x: any(kw in str(x) for kw in YOKOMOCHI_KEYWORDS) if pd.notna(x) else False)
     
-    def classify_route(row):
+    def classify_route(row: Any) -> str:
         item_name = str(row.get("品名", ""))
         inout = str(row.get("自社他社区分", ""))
         customer = str(row.get("得意先名", ""))
         transaction_type = str(row.get("取引区分", ""))
         
-        # 出荷データの判定（得意先名が存在するなら出荷）
         if pd.notna(row.get("得意先名")) and customer.strip() not in ["", "None", "nan"]:
             if "輸出" in customer or "輸出" in str(row.get("備考", "")):
                 return "輸出"
@@ -40,32 +70,43 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         if "持込" in transaction_type:
             return "持込み"
             
-        if "自社" in inout:
-            return "自社回収"
-        if "他社" in inout:
-            return "他社回収"
-            
+        if "引取" in transaction_type:
+            if "自社" in inout:
+                return "自社回収"
+            if "他社" in inout:
+                return "他社回収"
+                
         return "持込み"
         
     df["経路分類"] = df.apply(classify_route, axis=1)
     
-    def map_category(item_name):
+    def map_category(item_name: Any) -> str:
+        item_str = str(item_name)
         for k, v in ITEM_TO_CATEGORY.items():
-            if k in str(item_name):
+            if k in item_str:
                 return v
+        logger.warning(f"Unknown item mapped to ⑤その他: {item_name}")
         return "⑤その他"
         
     df["大品目分類"] = df["品名"].apply(map_category)
     
-    # 支払先名（管理会社）、仕入先名（客先名称）、運送店名（運搬業者）の欠損値を空文字に
     df["支払先名"] = df.get("支払先名", pd.Series([None]*len(df))).fillna("")
     df["仕入先名"] = df.get("仕入先名", pd.Series([None]*len(df))).fillna("")
     df["運送店名"] = df.get("運送店名", pd.Series([None]*len(df))).fillna("")
     df["得意先名"] = df.get("得意先名", pd.Series([None]*len(df))).fillna("")
     
+    def map_supplier(sup: str, is_yokomochi: bool) -> str:
+        if is_yokomochi or not sup: return sup
+        for mc in MAJOR_CLIENTS:
+            if mc and mc in sup:
+                return sup
+        return "そのた"
+    
+    df["仕入先名"] = df.apply(lambda r: map_supplier(str(r.get("仕入先名", "")), bool(r.get("横持フラグ", False))), axis=1)
+    
     return df
 
-MASTER_HIERARCHY = [
+MASTER_HIERARCHY: List[Any] = [
     {
         "cat_id": "①段ボール", "cat_disp": "段ボール",
         "routes": [
@@ -112,12 +153,12 @@ MASTER_HIERARCHY = [
     {
         "cat_id": "＜参考＞事業所間横持ち", "cat_disp": "事業所間横持ち",
         "routes": [
-            {"route_id": "事業所間横持", "route_match": ["横持"], "route_disp": "自社回収"}
+            {"route_id": "事業所間横持", "route_match": ["持込み", "自社回収", "他社回収", "プレス品"], "route_disp": "自社回収"}
         ]
     }
 ]
 
-SHIPPING_HIERARCHY = [
+SHIPPING_HIERARCHY: List[Any] = [
     {
         "cat_id": "①段ボール", "cat_disp": "段ボール",
         "routes": [
@@ -155,14 +196,12 @@ SHIPPING_HIERARCHY = [
     }
 ]
 
-
 def format_num(val: float) -> str:
     if val == 0:
         return "0"
     return f"{int(val):,}"
 
 def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
-    # 8-5計: A〜P列（16列分）。A=階層見出し, B=補足, C(2)〜O(14)=月別, P(15)=合計
     grid: List[List[Any]] = []
     
     if "transaction_date" in df.columns:
@@ -178,17 +217,15 @@ def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
         
     ym_to_col = {ym: (i + 2) for i, ym in enumerate(unique_yms)}
     
-    # 見出し行を追加
-    top_header = [None] * 16
+    top_header: List[Any] = [None] * 16
     for ym, col_idx in ym_to_col.items():
         top_header[col_idx] = str(ym)
-    top_header[15] = "合計"
+    top_header[15] = "前年同月差分"
     grid.append(top_header)
     
     for cat_info in MASTER_HIERARCHY:
         cat_id = cat_info["cat_id"]
         
-        # 大分類見出し
         grid.append([cat_id] + [None] * 15)
         
         for route_info in cat_info["routes"]:
@@ -200,47 +237,66 @@ def build_macro_report(df: pd.DataFrame) -> List[List[Any]]:
             else:
                 route_df = df[(df["大品目分類"] == cat_id) & (df["経路分類"].isin(route_match_list)) & (df["横持フラグ"] == False)].copy()
             
-            # 区分見出し
             grid.append(["", route_id] + [None] * 14)
             
-            route_totals = [0.0] * 14 # 13 months + total
+            route_totals = [0.0] * 14
             
             if not route_df.empty:
-                suppliers = sorted(route_df["仕入先名"].dropna().unique())
-                for supplier in suppliers:
-                    supp_df = route_df[route_df["仕入先名"] == supplier]
-                    row_data = [None] * 16
+                if cat_id == "＜参考＞事業所間横持ち":
+                    group_keys = ["仕入先名", "品名"]
+                else:
+                    group_keys = ["仕入先名"]
+
+                grouped = route_df.groupby(group_keys)
+                for keys, supp_df in sorted(grouped):
+                    row_data: List[Any] = [None] * 16
                     row_data[0] = ""
-                    row_data[1] = supplier
                     
+                    keys_tuple: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
+                    
+                    if cat_id == "＜参考＞事業所間横持ち":
+                        origin = str(keys_tuple[0]).replace("(横持)", "").replace("事業所", "").strip()
+                        row_data[1] = f"{origin}→厚木"
+                    else:
+                        row_data[1] = keys_tuple[0]
+                        
                     ym_sums = supp_df.groupby("_ym")["実重量"].sum()
-                    row_total = 0.0
+                    val_last_year = 0.0
+                    val_this_month = 0.0
+                    
                     for ym, weight in ym_sums.items():
                         if ym in ym_to_col:
                             c_idx = ym_to_col[ym]
                             row_data[c_idx] = format_num(float(weight))
-                            row_total += float(weight)
                             route_totals[c_idx - 2] += float(weight)
+                            
+                            if len(unique_yms) == 13:
+                                if ym == unique_yms[0]:
+                                    val_last_year = float(weight)
+                                elif ym == unique_yms[12]:
+                                    val_this_month = float(weight)
+                                    
+                    if len(unique_yms) == 13:
+                        diff = val_this_month - val_last_year
+                        row_data[15] = format_num(diff)
+                        route_totals[13] += diff
                     
-                    row_data[15] = format_num(row_total)
-                    route_totals[13] += row_total
                     grid.append(row_data)
                     
-            # 小計行
-            subtotal = [None] * 16
+            subtotal: List[Any] = [None] * 16
             subtotal[0] = ""
             subtotal[1] = f"{route_id.split('.')[-1]}合計" if "." in route_id else f"{route_id}合計"
             for i in range(13):
-                if route_totals[i] > 0:
+                if route_totals[i] > 0 or (route_totals[i] < 0): 
                     subtotal[i + 2] = format_num(route_totals[i])
             subtotal[15] = format_num(route_totals[13])
             grid.append(subtotal)
             
-        grid.append([None] * 16) # 空行
+        grid.append([None] * 16)
             
     return grid
 
-def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: int = None) -> List[List[Any]]:
+def build_micro_report(df: pd.DataFrame, target_year: Optional[int] = None, target_month: Optional[int] = None) -> List[List[Any]]:
     grid: List[List[Any]] = []
     
     if "transaction_date" in df.columns:
@@ -262,19 +318,16 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
         if not valid_dates.empty:
             mode_date = valid_dates.dt.to_period("M").mode()
             if not mode_date.empty:
-                year, month = mode_date.iloc[0].year, mode_date.iloc[0].month
+                year, month = int(mode_date.iloc[0].year), int(mode_date.iloc[0].month)
                 
-    # 指定された年月のデータのみにフィルタリング
     if not df.empty and "_year" in df.columns:
         df = df[(df["_year"] == year) & (df["_month"] == month)].copy()
             
-    # Top Header 行 1
-    row0 = [None] * 41
+    row0: List[Any] = [None] * 41
     row0[3] = f"{month}月"
     grid.append(row0)
     
-    # Top Header 行 2
-    row1 = [None] * 41
+    row1: List[Any] = [None] * 41
     row1[0] = "管理会社"
     row1[1] = "客先名称"
     row1[2] = "運搬業者"
@@ -297,10 +350,10 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
     row1[40] = "当月合計"
     grid.append(row1)
     
-    right_side_data = []
+    right_side_data: List[List[Any]] = []
     total_all = 0.0
+    nyuka_total = 0.0
     
-    # === 入荷セクション ===
     for cat_info in MASTER_HIERARCHY:
         cat_id = cat_info["cat_id"]
         cat_disp = cat_info["cat_disp"]
@@ -318,7 +371,7 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
             else:
                 route_df = df[(df["大品目分類"] == cat_id) & (df["経路分類"].isin(route_match_list)) & (df["横持フラグ"] == False)].copy()
                 
-            h_row = [None] * 41
+            h_row: List[Any] = [None] * 41
             h_row[0] = f"{cat_disp}-{route_disp}"
             grid.append(h_row)
             
@@ -328,43 +381,66 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
             route_totals = [0.0] * 32
             
             if not route_df.empty:
-                # groupby 細分化キー
-                group_keys = ["支払先名", "仕入先名", "運送店名", "品名"]
+                if cat_id == "＜参考＞事業所間横持ち":
+                    group_keys = ["仕入先名", "品名"]
+                else:
+                    group_keys = ["支払先名", "仕入先名", "運送店名", "品名"]
+
                 grouped = route_df.groupby(group_keys)
                 
-                # keyごとにソートして出力
                 for keys, supp_df in sorted(grouped):
-                    r_data = [None] * 41
-                    r_data[0] = keys[0] # 管理会社
-                    r_data[1] = keys[1] # 客先名称
-                    r_data[2] = keys[2] # 運搬業者
-                    r_data[3] = keys[3] # 品名
+                    r_data: List[Any] = [None] * 41
                     
-                    # E列(index 4)の表示区分マッピング（「持込」以外はすべて「引取」）
+                    keys_tuple: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
+                    
+                    if cat_id == "＜参考＞事業所間横持ち":
+                        if len(keys_tuple) >= 2:
+                            origin = str(keys_tuple[0]).replace("(横持)", "").replace("事業所", "").strip()
+                            r_data[1] = f"{origin}→厚木"
+                            r_data[3] = keys_tuple[1]
+                        else:
+                            origin = str(keys_tuple[0]).replace("(横持)", "").replace("事業所", "").strip()
+                            r_data[1] = f"{origin}→厚木"
+                            r_data[3] = ""
+                    else:
+                        if len(keys_tuple) >= 4:
+                            r_data[0] = keys_tuple[0] 
+                            r_data[1] = keys_tuple[1] 
+                            r_data[2] = keys_tuple[2] 
+                            if cat_id == "⑤その他":
+                                r_data[3] = keys_tuple[3] 
+                            else:
+                                r_data[3] = ""
+                        else:
+                            r_data[0] = str(keys_tuple[0])
+                            r_data[3] = ""
+                    
                     r_data[4] = "持込" if "持込" in route_disp else "引取"
                     
                     row_total = 0.0
                     day_sums = supp_df.groupby("_day")["実重量"].sum()
-                    for d, weight in day_sums.items():
-                        if pd.notna(d) and 1 <= int(d) <= 31:
-                            r_data[4 + int(d)] = format_num(float(weight))
+                    for day_key, weight in day_sums.items():
+                        if pd.notna(cast(Any, day_key)) and 1 <= int(str(day_key)) <= 31:
+                            r_data[4 + int(str(day_key))] = format_num(float(weight))
                             row_total += float(weight)
-                            route_totals[int(d)] += float(weight)
+                            route_totals[int(str(day_key))] += float(weight)
                             
                     r_data[36] = format_num(row_total)
                     route_totals[0] += row_total
                     grid.append(r_data)
                     
-                    # 業者名を出力（右側集計枠用）
-                    disp_supplier = keys[1] if keys[1] else keys[0]
+                    if len(keys_tuple) >= 2:
+                        disp_supplier = keys_tuple[1] if keys_tuple[1] else keys_tuple[0]
+                    else:
+                        disp_supplier = str(keys_tuple[0])
+                        
                     right_side_data.append(["", disp_supplier, format_num(row_total)])
                     
-            # 小計行
-            subtotal = [None] * 41
+            subtotal: List[Any] = [None] * 41
             subtotal_label = f"{route_id.split('.')[-1]}合計" if "." in route_id else f"{route_id}合計"
             subtotal[4] = subtotal_label
             for d in range(1, 32):
-                if route_totals[d] > 0:
+                if route_totals[d] > 0 or route_totals[d] < 0:
                     subtotal[4 + d] = format_num(route_totals[d])
             subtotal[36] = format_num(route_totals[0])
             grid.append(subtotal)
@@ -372,25 +448,30 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
             cat_total += route_totals[0]
             right_side_data[right_side_idx][2] = format_num(route_totals[0])
             
-        # 大分類合計行
-        cat_total_row = [None] * 41
+        cat_total_row: List[Any] = [None] * 41
         cat_total_row[4] = f"{cat_disp}合計"
         cat_total_row[36] = format_num(cat_total)
         grid.append(cat_total_row)
         
-        # 空行
         grid.append([None] * 41)
         
         total_all += cat_total
+        if cat_id != "＜参考＞事業所間横持ち":
+            nyuka_total += cat_total
+            
+        if cat_id == "⑤その他":
+            nyuka_total_row: List[Any] = [None] * 41
+            nyuka_total_row[4] = "入荷合計(横持除く)"
+            nyuka_total_row[36] = format_num(nyuka_total)
+            grid.append(nyuka_total_row)
+            grid.append([None] * 41)
         
-    # 入荷総合計行
-    grand_total = [None] * 41
+    grand_total: List[Any] = [None] * 41
     grand_total[4] = "入荷総合計"
     grand_total[36] = format_num(total_all)
     grid.append(grand_total)
     grid.append([None] * 41)
     
-    # === 出荷セクション ===
     grid.append(["＜出荷＞"] + [None]*40)
     
     shipping_total_all = 0.0
@@ -405,7 +486,6 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
             route_id = route_info["route_id"]
             route_match_list = route_info["route_match"]
             
-            # 出荷データ抽出条件
             route_df = df[(df["大品目分類"] == cat_id) & (df["経路分類"].isin(route_match_list))].copy()
             if route_df.empty:
                 continue
@@ -422,50 +502,52 @@ def build_micro_report(df: pd.DataFrame, target_year: int = None, target_month: 
             grouped = route_df.groupby(group_keys)
             
             for keys, supp_df in sorted(grouped):
-                r_data = [None] * 41
-                r_data[1] = keys[0] # 得意先名
-                r_data[3] = keys[1] # 品名
+                r_data_ship: List[Any] = [None] * 41
+                keys_tuple_ship: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
+                
+                if len(keys_tuple_ship) >= 2:
+                    r_data_ship[1] = keys_tuple_ship[0] 
+                    r_data_ship[3] = keys_tuple_ship[1] 
+                else:
+                    r_data_ship[1] = str(keys_tuple_ship[0])
                 
                 row_total = 0.0
                 day_sums = supp_df.groupby("_day")["実重量"].sum()
-                for d, weight in day_sums.items():
-                    if pd.notna(d) and 1 <= int(d) <= 31:
-                        r_data[4 + int(d)] = format_num(float(weight))
+                for day_key, weight in day_sums.items():
+                    if pd.notna(cast(Any, day_key)) and 1 <= int(str(day_key)) <= 31:
+                        r_data_ship[4 + int(str(day_key))] = format_num(float(weight))
                         row_total += float(weight)
-                        route_totals[int(d)] += float(weight)
+                        route_totals[int(str(day_key))] += float(weight)
                         
-                r_data[36] = format_num(row_total)
+                r_data_ship[36] = format_num(row_total)
                 route_totals[0] += row_total
-                grid.append(r_data)
+                grid.append(r_data_ship)
                 
-            # 小計行 (輸出合計, 国内合計)
-            subtotal = [None] * 41
-            subtotal[1] = f"{route_id.split('.')[-1]}合計"
+            subtotal_ship = [None] * 41
+            subtotal_ship[1] = f"{route_id.split('.')[-1]}合計"
             for d in range(1, 32):
-                if route_totals[d] > 0:
-                    subtotal[4 + d] = format_num(route_totals[d])
-            subtotal[36] = format_num(route_totals[0])
-            grid.append(subtotal)
+                if route_totals[d] > 0 or route_totals[d] < 0:
+                    subtotal_ship[4 + d] = format_num(route_totals[d])
+            subtotal_ship[36] = format_num(route_totals[0])
+            grid.append(subtotal_ship)
             grid.append([None] * 41)
             
             cat_total += route_totals[0]
             
         if cat_total > 0:
-            cat_total_row = [None] * 41
-            cat_total_row[1] = f"{cat_disp}出荷合計"
-            cat_total_row[36] = format_num(cat_total)
-            grid.append(cat_total_row)
+            cat_total_row_ship = [None] * 41
+            cat_total_row_ship[1] = f"{cat_disp}出荷合計"
+            cat_total_row_ship[36] = format_num(cat_total)
+            grid.append(cat_total_row_ship)
             grid.append([None] * 41)
             shipping_total_all += cat_total
             
-    # 出荷総合計行
     if shipping_total_all > 0:
-        ship_grand_total = [None] * 41
+        ship_grand_total: List[Any] = [None] * 41
         ship_grand_total[1] = "出荷総合計"
         ship_grand_total[36] = format_num(shipping_total_all)
         grid.append(ship_grand_total)
 
-    # === 右側集計枠の結合 ===
     for i in range(len(right_side_data)):
         rs_row = right_side_data[i]
         rs_padded = rs_row + [""] * max(0, 3 - len(rs_row))
