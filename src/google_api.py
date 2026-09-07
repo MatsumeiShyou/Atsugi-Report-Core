@@ -145,8 +145,7 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1) -> No
                 
     if cells:
         logger.info(f"シート '{sheet_name}' に {len(cells)} セルを部分書き込みします...")
-        from gspread.utils import ValueInputOption
-        wks.update_cells(cells, value_input_option=ValueInputOption.user_entered)
+        wks.update_cells(cells, value_input_option='USER_ENTERED')
         logger.info("書き込みが完了しました。")
     else:
         logger.info(f"シート '{sheet_name}' に書き込むデータがありませんでした。")

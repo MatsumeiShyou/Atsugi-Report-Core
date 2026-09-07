@@ -24,7 +24,7 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
     
     # ホワイトリスト方式でスキーマ（有効な列名一覧）を動的に取得
     schema_res = client.table("raw_nyuka_data").select("*").limit(1).execute()
-    if schema_res.data and isinstance(schema_res.data[0], dict):
+    if schema_res.data:
         valid_columns = set(schema_res.data[0].keys())
     else:
         # データが存在しない場合のフォールバック（テーブル定義済みの想定カラムリスト）

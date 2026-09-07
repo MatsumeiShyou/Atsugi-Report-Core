@@ -53,33 +53,18 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     df["実重量"] = df["正味重量"].fillna(0) + df["調整重量"].fillna(0)
     df["横持フラグ"] = df["仕入先名"].apply(lambda x: any(kw in str(x) for kw in YOKOMOCHI_KEYWORDS) if pd.notna(x) else False)
     
-    # --- 品目分類を経路分類より先に実行（プレス判定で品目を参照するため） ---
-    def map_category(item_name: Any) -> str:
-        item_str = str(item_name)
-        for k, v in ITEM_TO_CATEGORY.items():
-            if k in item_str:
-                return v
-        logger.warning(f"Unknown item mapped to ⑤その他: {item_name}")
-        return "⑤その他"
-        
-    df["大品目分類"] = df["品名"].apply(map_category)
-    
-    # --- 経路分類（品目分類の結果を参照可能） ---
     def classify_route(row: Any) -> str:
         item_name = str(row.get("品名", ""))
         inout = str(row.get("自社他社区分", ""))
         customer = str(row.get("得意先名", ""))
         transaction_type = str(row.get("取引区分", ""))
-        category = str(row.get("大品目分類", ""))
         
         if pd.notna(row.get("得意先名")) and customer.strip() not in ["", "None", "nan"]:
             if "輸出" in customer or "輸出" in str(row.get("備考", "")):
                 return "輸出"
             return "国内"
 
-        # 矛盾②対策: ④プラ類と⑤その他にはプレス枠がないため、
-        # プレス判定をスキップしてバラとして経路分類する
-        if "プレス" in item_name and category not in ("④プラ類", "⑤その他"):
+        if "プレス" in item_name:
             return "プレス品"
             
         if "持込" in transaction_type:
@@ -95,25 +80,29 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         
     df["経路分類"] = df.apply(classify_route, axis=1)
     
+    def map_category(item_name: Any) -> str:
+        item_str = str(item_name)
+        for k, v in ITEM_TO_CATEGORY.items():
+            if k in item_str:
+                return v
+        logger.warning(f"Unknown item mapped to ⑤その他: {item_name}")
+        return "⑤その他"
+        
+    df["大品目分類"] = df["品名"].apply(map_category)
+    
     df["支払先名"] = df.get("支払先名", pd.Series([None]*len(df))).fillna("")
     df["仕入先名"] = df.get("仕入先名", pd.Series([None]*len(df))).fillna("")
     df["運送店名"] = df.get("運送店名", pd.Series([None]*len(df))).fillna("")
     df["得意先名"] = df.get("得意先名", pd.Series([None]*len(df))).fillna("")
     
-    # 矛盾①対策: ⑤その他の品目は仕入先名を個別に保持する
-    def map_supplier(sup: str, is_yokomochi: bool, category: str) -> str:
+    def map_supplier(sup: str, is_yokomochi: bool) -> str:
         if is_yokomochi or not sup: return sup
-        if category == "⑤その他": return sup  # ⑤その他は仕入先名を集約しない
         for mc in MAJOR_CLIENTS:
             if mc and mc in sup:
                 return sup
         return "そのた"
     
-    df["仕入先名"] = df.apply(lambda r: map_supplier(
-        str(r.get("仕入先名", "")),
-        bool(r.get("横持フラグ", False)),
-        str(r.get("大品目分類", ""))
-    ), axis=1)
+    df["仕入先名"] = df.apply(lambda r: map_supplier(str(r.get("仕入先名", "")), bool(r.get("横持フラグ", False))), axis=1)
     
     return df
 
@@ -534,7 +523,7 @@ def build_micro_report(df: pd.DataFrame, target_year: Optional[int] = None, targ
                 route_totals[0] += row_total
                 grid.append(r_data_ship)
                 
-            subtotal_ship: List[Any] = [None] * 41
+            subtotal_ship = [None] * 41
             subtotal_ship[1] = f"{route_id.split('.')[-1]}合計"
             for d in range(1, 32):
                 if route_totals[d] > 0 or route_totals[d] < 0:
@@ -546,7 +535,7 @@ def build_micro_report(df: pd.DataFrame, target_year: Optional[int] = None, targ
             cat_total += route_totals[0]
             
         if cat_total > 0:
-            cat_total_row_ship: List[Any] = [None] * 41
+            cat_total_row_ship = [None] * 41
             cat_total_row_ship[1] = f"{cat_disp}出荷合計"
             cat_total_row_ship[36] = format_num(cat_total)
             grid.append(cat_total_row_ship)
