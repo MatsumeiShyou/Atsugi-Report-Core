@@ -26,9 +26,11 @@ ITEM_TO_CATEGORY = {
     "上白": "⑤その他", "紙パック": "⑤その他", "紙管": "⑤その他", "その他": "⑤その他"
 }
 
+from typing import Any, List, Dict
+
 # --- 事務員が手入力する「値引き」「調整」等を元の品目に紐づけるためのリスト（案1） ---
 # キー: 仕入先名の一部, 値: マッピング先の「大品目分類」
-ADJUSTMENT_SUPPLIER_RULES = {
+ADJUSTMENT_SUPPLIER_RULES: Dict[str, str] = {
     # 例: "株式会社〇〇": "①段ボール",
 }
 
@@ -562,7 +564,7 @@ def build_micro_report(df: pd.DataFrame, target_year: Optional[int] = None, targ
                 route_totals[0] += row_total
                 grid.append(r_data_ship)
                 
-            subtotal_ship = [None] * 41
+            subtotal_ship: List[Any] = [None] * 41
             subtotal_ship[1] = f"{route_id.split('.')[-1]}合計"
             for d in range(1, 32):
                 if route_totals[d] > 0 or route_totals[d] < 0:
@@ -574,7 +576,7 @@ def build_micro_report(df: pd.DataFrame, target_year: Optional[int] = None, targ
             cat_total += route_totals[0]
             
         if cat_total > 0:
-            cat_total_row_ship = [None] * 41
+            cat_total_row_ship: List[Any] = [None] * 41
             cat_total_row_ship[1] = f"{cat_disp}出荷合計"
             cat_total_row_ship[36] = format_num(cat_total)
             grid.append(cat_total_row_ship)

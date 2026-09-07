@@ -15,6 +15,7 @@ import google.auth # type: ignore
 from googleapiclient.discovery import build # type: ignore
 from googleapiclient.http import MediaIoBaseDownload # type: ignore
 import gspread # type: ignore
+from gspread.utils import ValueInputOption # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1) -> No
                 
     if cells:
         logger.info(f"シート '{sheet_name}' に {len(cells)} セルを部分書き込みします...")
-        wks.update_cells(cells, value_input_option='USER_ENTERED')
+        wks.update_cells(cells, value_input_option=ValueInputOption.user_entered)
         logger.info("書き込みが完了しました。")
     else:
         logger.info(f"シート '{sheet_name}' に書き込むデータがありませんでした。")
