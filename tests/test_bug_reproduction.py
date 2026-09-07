@@ -104,3 +104,63 @@ def test_macro_p_column_is_diff_not_total() -> None:
                 f"期待値は '200'（差分の合算）"
             )
             break
+
+def test_sonota_category_preserves_supplier_name() -> None:
+    from aggregate_report import transform_raw_data
+    import pandas as pd
+    data = {
+        "仕入先名": ["A社", "B社"],
+        "品名": ["ウエス", "牛乳パック"],
+        "取引区分": ["持込", "持込"],
+        "自社他社区分": ["", ""],
+        "得意先名": ["", ""],
+        "正味重量": [100, 200],
+        "調整重量": [0, 0],
+        "transaction_date": ["2026-09-01", "2026-09-01"],
+    }
+    df = pd.DataFrame(data)
+    transformed = transform_raw_data(df)
+    assert transformed.loc[0, "仕入先名"] == "A社"
+    assert transformed.loc[1, "仕入先名"] == "B社"
+
+def test_plastic_press_not_lost() -> None:
+    from aggregate_report import transform_raw_data
+    import pandas as pd
+    data = {
+        "仕入先名": ["A社"],
+        "品名": ["廃プラ軟質(プレス)"],
+        "取引区分": ["持込"],
+        "自社他社区分": [""],
+        "得意先名": [""],
+        "正味重量": [100],
+        "調整重量": [0],
+        "transaction_date": ["2026-09-01"],
+    }
+    df = pd.DataFrame(data)
+    transformed = transform_raw_data(df)
+    assert transformed.loc[0, "経路分類"] == "持込み"
+
+def test_hybrid_adjustment_logic() -> None:
+    import aggregate_report
+    import pandas as pd
+    data = {
+        "仕入先名": ["A社", "B社_事前登録あり", "C社_登録なし"],
+        "品名": ["値引き", "調整", "マイナス分"],
+        "備考": ["段ボールの分", "", ""],
+        "取引区分": ["持込", "持込", "持込"],
+        "自社他社区分": ["", "", ""],
+        "得意先名": ["", "", ""],
+        "正味重量": [-100, -200, -300],
+        "調整重量": [0, 0, 0],
+        "transaction_date": ["2026-09-01", "2026-09-01", "2026-09-01"],
+    }
+    df = pd.DataFrame(data)
+    original = getattr(aggregate_report, "ADJUSTMENT_SUPPLIER_RULES", {})
+    aggregate_report.ADJUSTMENT_SUPPLIER_RULES = {"B社_事前登録あり": "②新聞"}
+    try:
+        transformed = aggregate_report.transform_raw_data(df)
+        assert transformed.loc[0, "大品目分類"] == "①段ボール"
+        assert transformed.loc[1, "大品目分類"] == "②新聞"
+        assert transformed.loc[2, "大品目分類"] == "⑤その他"
+    finally:
+        aggregate_report.ADJUSTMENT_SUPPLIER_RULES = original

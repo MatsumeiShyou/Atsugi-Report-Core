@@ -26,6 +26,12 @@ ITEM_TO_CATEGORY = {
     "上白": "⑤その他", "紙パック": "⑤その他", "紙管": "⑤その他", "その他": "⑤その他"
 }
 
+# --- 事務員が手入力する「値引き」「調整」等を元の品目に紐づけるためのリスト（案1） ---
+# キー: 仕入先名の一部, 値: マッピング先の「大品目分類」
+ADJUSTMENT_SUPPLIER_RULES = {
+    # 例: "株式会社〇〇": "①段ボール",
+}
+
 def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.select_dtypes(include=['object', 'string']).columns:
         df[col] = df[col].apply(
@@ -50,21 +56,58 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         except Exception as e:
             print(f"Warning: Failed to apply item_aliases.json: {e}")
         
-    df["実重量"] = df["正味重量"].fillna(0) + df["調整重量"].fillna(0)
+    # --- 実重量の計算 (文字列からの数値変換を安全に行う) ---
+    df["実重量"] = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0) + \
+                 pd.to_numeric(df.get("調整重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    
     df["横持フラグ"] = df["仕入先名"].apply(lambda x: any(kw in str(x) for kw in YOKOMOCHI_KEYWORDS) if pd.notna(x) else False)
     
+    # --- 品目分類を経路分類より先に実行（プレス判定等で参照するため） ---
+    def map_category(row: Any) -> str:
+        item_str = str(row.get("品名", ""))
+        
+        # 1. 既存の品名による判定
+        for k, v in ITEM_TO_CATEGORY.items():
+            if k in item_str:
+                return v
+                
+        # 2. 矛盾④対策：マイナス値または調整キーワードが含まれる場合のハイブリッド救済ロジック
+        weight = float(row.get("実重量", 0))
+        is_adjustment = weight < 0 or any(kw in item_str for kw in ["値引", "調整", "相殺", "ﾏｲﾅｽ", "マイナス"])
+        
+        if is_adjustment:
+            # 案3: 備考欄を読んで判定
+            note_str = str(row.get("備考", ""))
+            for k, v in ITEM_TO_CATEGORY.items():
+                if k in note_str:
+                    return v
+                    
+            # 案1: 事前登録された仕入先リストによる判定
+            supplier = str(row.get("仕入先名", ""))
+            for sup_k, cat_v in ADJUSTMENT_SUPPLIER_RULES.items():
+                if sup_k in supplier:
+                    return cat_v
+                    
+        logger.warning(f"Unknown item mapped to ⑤その他: {item_str}")
+        return "⑤その他"
+        
+    df["大品目分類"] = df.apply(map_category, axis=1)
+    
+    # --- 経路分類 ---
     def classify_route(row: Any) -> str:
         item_name = str(row.get("品名", ""))
         inout = str(row.get("自社他社区分", ""))
         customer = str(row.get("得意先名", ""))
         transaction_type = str(row.get("取引区分", ""))
+        category = str(row.get("大品目分類", ""))
         
         if pd.notna(row.get("得意先名")) and customer.strip() not in ["", "None", "nan"]:
             if "輸出" in customer or "輸出" in str(row.get("備考", "")):
                 return "輸出"
             return "国内"
 
-        if "プレス" in item_name:
+        # 矛盾②対策: ④プラ類と⑤その他にはプレス枠がないためバラとして扱う
+        if "プレス" in item_name and category not in ("④プラ類", "⑤その他"):
             return "プレス品"
             
         if "持込" in transaction_type:
@@ -80,29 +123,25 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         
     df["経路分類"] = df.apply(classify_route, axis=1)
     
-    def map_category(item_name: Any) -> str:
-        item_str = str(item_name)
-        for k, v in ITEM_TO_CATEGORY.items():
-            if k in item_str:
-                return v
-        logger.warning(f"Unknown item mapped to ⑤その他: {item_name}")
-        return "⑤その他"
-        
-    df["大品目分類"] = df["品名"].apply(map_category)
-    
     df["支払先名"] = df.get("支払先名", pd.Series([None]*len(df))).fillna("")
     df["仕入先名"] = df.get("仕入先名", pd.Series([None]*len(df))).fillna("")
     df["運送店名"] = df.get("運送店名", pd.Series([None]*len(df))).fillna("")
     df["得意先名"] = df.get("得意先名", pd.Series([None]*len(df))).fillna("")
     
-    def map_supplier(sup: str, is_yokomochi: bool) -> str:
+    # 矛盾①対策: ⑤その他の品目は仕入先名を集約せず個別に保持する
+    def map_supplier(sup: str, is_yokomochi: bool, category: str) -> str:
         if is_yokomochi or not sup: return sup
+        if category == "⑤その他": return sup
         for mc in MAJOR_CLIENTS:
             if mc and mc in sup:
                 return sup
         return "そのた"
     
-    df["仕入先名"] = df.apply(lambda r: map_supplier(str(r.get("仕入先名", "")), bool(r.get("横持フラグ", False))), axis=1)
+    df["仕入先名"] = df.apply(lambda r: map_supplier(
+        str(r.get("仕入先名", "")),
+        bool(r.get("横持フラグ", False)),
+        str(r.get("大品目分類", ""))
+    ), axis=1)
     
     return df
 
