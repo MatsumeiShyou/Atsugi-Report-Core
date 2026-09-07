@@ -28,12 +28,6 @@ ITEM_TO_CATEGORY = {
 
 from typing import Any, List, Dict
 
-# --- 事務員が手入力する「値引き」「調整」等を元の品目に紐づけるためのリスト（案1） ---
-# キー: 仕入先名の一部, 値: マッピング先の「大品目分類」
-ADJUSTMENT_SUPPLIER_RULES: Dict[str, str] = {
-    # 例: "株式会社〇〇": "①段ボール",
-}
-
 def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.select_dtypes(include=['object', 'string']).columns:
         df[col] = df[col].apply(
@@ -84,12 +78,7 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
                 if k in note_str:
                     return v
                     
-            # 案1: 事前登録された仕入先リストによる判定
-            supplier = str(row.get("仕入先名", ""))
-            for sup_k, cat_v in ADJUSTMENT_SUPPLIER_RULES.items():
-                if sup_k in supplier:
-                    return cat_v
-                    
+        # 備考欄にも手がかりがなければ安全のため⑤その他とする
         logger.warning(f"Unknown item mapped to ⑤その他: {item_str}")
         return "⑤その他"
         

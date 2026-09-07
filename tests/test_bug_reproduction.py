@@ -141,26 +141,22 @@ def test_plastic_press_not_lost() -> None:
     assert transformed.loc[0, "経路分類"] == "持込み"
 
 def test_hybrid_adjustment_logic() -> None:
-    import aggregate_report
     import pandas as pd
+    from aggregate_report import transform_raw_data
     data = {
-        "仕入先名": ["A社", "B社_事前登録あり", "C社_登録なし"],
-        "品名": ["値引き", "調整", "マイナス分"],
-        "備考": ["段ボールの分", "", ""],
-        "取引区分": ["持込", "持込", "持込"],
-        "自社他社区分": ["", "", ""],
-        "得意先名": ["", "", ""],
-        "正味重量": [-100, -200, -300],
-        "調整重量": [0, 0, 0],
-        "transaction_date": ["2026-09-01", "2026-09-01", "2026-09-01"],
+        "仕入先名": ["A社", "C社"],
+        "品名": ["値引き", "マイナス分"],
+        "備考": ["段ボールの分", ""],
+        "取引区分": ["持込", "持込"],
+        "自社他社区分": ["", ""],
+        "得意先名": ["", ""],
+        "正味重量": [-100, -300],
+        "調整重量": [0, 0],
+        "transaction_date": ["2026-09-01", "2026-09-01"],
     }
     df = pd.DataFrame(data)
-    original = getattr(aggregate_report, "ADJUSTMENT_SUPPLIER_RULES", {})
-    aggregate_report.ADJUSTMENT_SUPPLIER_RULES = {"B社_事前登録あり": "②新聞"}
-    try:
-        transformed = aggregate_report.transform_raw_data(df)
-        assert transformed.loc[0, "大品目分類"] == "①段ボール"
-        assert transformed.loc[1, "大品目分類"] == "②新聞"
-        assert transformed.loc[2, "大品目分類"] == "⑤その他"
-    finally:
-        aggregate_report.ADJUSTMENT_SUPPLIER_RULES = original
+    transformed = transform_raw_data(df)
+    # 案3: 備考欄に「段ボール」とあるため、品名が「値引き」でも①段ボールになるべき
+    assert transformed.loc[0, "大品目分類"] == "①段ボール"
+    # 救済不可: 備考欄もなく事前登録もない場合は安全に⑤その他になるべき
+    assert transformed.loc[1, "大品目分類"] == "⑤その他"
