@@ -160,3 +160,17 @@ def test_hybrid_adjustment_logic() -> None:
     assert transformed.loc[0, "大品目分類"] == "①段ボール"
     # 救済不可: 備考欄もなく事前登録もない場合は安全に⑤その他になるべき
     assert transformed.loc[1, "大品目分類"] == "⑤その他"
+
+
+def test_zero_net_weight_filtering():
+    from src.aggregate_report import transform_raw_data
+    import pandas as pd
+    df = pd.DataFrame([
+        {'仕入先名': 'A', '品名': 'Cardboard', '正味重量': '0', '調整重量': '1,000'},
+        {'仕入先名': 'B', '品名': 'Cardboard', '正味重量': '0', '調整重量': '-210'},
+        {'仕入先名': 'C', '品名': 'Cardboard', '正味重量': '500', '調整重量': '0'}
+    ])
+    result = transform_raw_data(df)
+    assert not (result['仕入先名'] == 'A').any()
+    assert (result['仕入先名'] == 'B').any()
+    assert (result['仕入先名'] == 'C').any()
