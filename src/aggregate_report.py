@@ -51,6 +51,12 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
                     df.loc[mask_client & mask_item, "品名"] = replace_with
         except Exception as e:
             print(f"Warning: Failed to apply item_aliases.json: {e}")
+            
+    # --- 金額調整用レコード（正味重量が0かつ調整重量が正のデータ）を除外 ---
+    if "正味重量" in df.columns and "調整重量" in df.columns:
+        net_w = pd.to_numeric(df["正味重量"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+        adj_w = pd.to_numeric(df["調整重量"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+        df = df[~((net_w == 0) & (adj_w > 0))].copy()
         
     # --- 実重量の計算 (文字列からの数値変換を安全に行う) ---
     df["実重量"] = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0) + \
