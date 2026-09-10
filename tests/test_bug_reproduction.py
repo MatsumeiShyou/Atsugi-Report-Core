@@ -138,7 +138,7 @@ def test_plastic_press_not_lost() -> None:
     }
     df = pd.DataFrame(data)
     transformed = transform_raw_data(df)
-    assert transformed.loc[0, "経路分類"] == "持込み"
+    assert transformed.loc[0, "経路分類"] == "プレス品"
 
 def test_hybrid_adjustment_logic() -> None:
     import pandas as pd
@@ -163,14 +163,18 @@ def test_hybrid_adjustment_logic() -> None:
 
 
 def test_zero_net_weight_filtering():
-    from src.aggregate_report import transform_raw_data
+    import sys
+    sys.path.insert(0, 'src')
+    from aggregate_report import transform_raw_data
     import pandas as pd
     df = pd.DataFrame([
-        {'仕入先名': 'A', '品名': 'Cardboard', '正味重量': '0', '調整重量': '1,000'},
-        {'仕入先名': 'B', '品名': 'Cardboard', '正味重量': '0', '調整重量': '-210'},
-        {'仕入先名': 'C', '品名': 'Cardboard', '正味重量': '500', '調整重量': '0'}
+        {'仕入先名': 'A', '品名': '段ボール', '正味重量': '0', '調整重量': '1,000'},
+        {'仕入先名': 'B', '品名': '段ボール', '正味重量': '0', '調整重量': '-210'},
+        {'仕入先名': 'C', '品名': '段ボール', '正味重量': '500', '調整重量': '0'}
     ])
     result = transform_raw_data(df)
-    assert not (result['仕入先名'] == 'A').any()
-    assert (result['仕入先名'] == 'B').any()
-    assert (result['仕入先名'] == 'C').any()
+    # 修正仕様: 正味0・調整プラスのデータも除外されず3件すべて保持されること
+    assert len(result) == 3
+    assert result.loc[0, '実重量'] == 1000.0
+    assert result.loc[1, '実重量'] == -210.0
+    assert result.loc[2, '実重量'] == 500.0

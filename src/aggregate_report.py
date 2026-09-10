@@ -14,16 +14,20 @@ for k in MICRO_ROW_MAP.keys():
 
 logger = logging.getLogger(__name__)
 
-YOKOMOCHI_KEYWORDS = ["富士", "浜松", "御殿場", "(横持)"]
+YOKOMOCHI_KEYWORDS = ["(横持)"]
 
 # 新しいマッピングの追加
 ITEM_TO_CATEGORY = {
-    "段ボール": "①段ボール", "新聞": "②新聞", "雑誌": "③雑誌", 
-    "PETボトル": "④プラ類", "ストレッチフィルム": "④プラ類", "シュリンクフィルム": "④プラ類", 
-    "PPバンド": "④プラ類", "廃プラ軟質": "④プラ類", "プラスチックパレット": "④プラ類",
-    "牛乳パック": "⑤その他", "雑古紙": "⑤その他", "雑がみ": "⑤その他", "ウエス": "⑤その他", 
-    "台紙": "⑤その他", "模造": "⑤その他", "クラフト": "⑤その他", "窓付廃紙": "⑤その他", 
-    "上白": "⑤その他", "紙パック": "⑤その他", "紙管": "⑤その他", "その他": "⑤その他"
+    "段ボール": "①段ボール", "E段": "①段ボール",
+    "新聞": "②新聞",
+    "雑誌": "③雑誌", "雑古紙": "③雑誌", "雑がみ": "③雑誌", "ミックス紙": "③雑誌",
+    "PETボトル": "④プラ類", "ペットボトル": "④プラ類", "ストレッチフィルム": "④プラ類", "シュリンクフィルム": "④プラ類", 
+    "PPバンド": "④プラ類", "廃プラ軟質": "④プラ類", "プラスチックパレット": "④プラ類", "フイルム": "④プラ類", "フィルム": "④プラ類",
+    "牛乳パック": "⑤その他", "ウエス": "⑤その他", "台紙": "⑤その他", "上台紙": "⑤その他",
+    "模造": "⑤その他", "クラフト": "⑤その他", "色クラフト": "⑤その他", "窓付廃紙": "⑤その他", 
+    "上白": "⑤その他", "紙パック": "⑤その他", "紙管": "⑤その他", "シュレッダー": "⑤その他",
+    "ケント": "⑤その他", "上ケント": "⑤その他", "損紙": "⑤その他", "白・色混り": "⑤その他",
+    "ワンプ": "⑤その他", "カップ原紙": "⑤その他", "マルチパック": "⑤その他", "その他": "⑤その他"
 }
 
 from typing import Any, List, Dict
@@ -52,39 +56,47 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         except Exception as e:
             print(f"Warning: Failed to apply item_aliases.json: {e}")
             
-    # --- 金額調整用レコード（正味重量が0かつ調整重量が正のデータ）を除外 ---
-    if "正味重量" in df.columns and "調整重量" in df.columns:
-        net_w = pd.to_numeric(df["正味重量"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-        adj_w = pd.to_numeric(df["調整重量"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-        df = df[~((net_w == 0) & (adj_w > 0))].copy()
+    # 厚木事業所（ヤードコード27）のデータのみを抽出
+    if "ヤードコード" in df.columns:
+        df = df[df["ヤードコード"].astype(str) == "27"].copy()
+    elif "ヤード名" in df.columns:
+        df = df[df["ヤード名"].astype(str).str.contains("厚木", na=False)].copy()
         
-    # --- 実重量の計算 (文字列からの数値変換を安全に行う) ---
+    # 非重量商品（運搬料や取扱手数料など）の除外
+    if "品名" in df.columns:
+        df = df[~df["品名"].astype(str).str.contains("運搬|取扱|手数料|加工賃|紹介料|リース", na=False)].copy()
+        
+    # --- 実重量の計算 (文字列からのカンマ削除・数値変換を安全に行う) ---
     df["実重量"] = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0) + \
                  pd.to_numeric(df.get("調整重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-    
+
     df["横持フラグ"] = df["仕入先名"].apply(lambda x: any(kw in str(x) for kw in YOKOMOCHI_KEYWORDS) if pd.notna(x) else False)
     
     # --- 品目分類を経路分類より先に実行（プレス判定等で参照するため） ---
     def map_category(row: Any) -> str:
+        # 1. 最優先: 横持ちの排他処理
+        if row.get("横持フラグ") == True:
+            return "＜参考＞事業所間横持ち"
+
         item_str = str(row.get("品名", ""))
         
-        # 1. 既存の品名による判定
+        # 2. 既存の品名による判定
         for k, v in ITEM_TO_CATEGORY.items():
             if k in item_str:
                 return v
                 
-        # 2. 矛盾④対策：マイナス値または調整キーワードが含まれる場合のハイブリッド救済ロジック
+        # 3. 矛盾④対策：マイナス値または調整キーワードが含まれる場合はハイブリッド救済ロジック
         weight = float(row.get("実重量", 0))
-        is_adjustment = weight < 0 or any(kw in item_str for kw in ["値引", "調整", "相殺", "ﾏｲﾅｽ", "マイナス"])
+        is_adjustment = weight < 0 or any(kw in item_str for kw in ["値引", "調整", "相殺", "ﾃﾝﾋﾞｷ", "マイナス"])
         
         if is_adjustment:
-            # 案3: 備考欄を読んで判定
+            # 備考を読んで判定
             note_str = str(row.get("備考", ""))
             for k, v in ITEM_TO_CATEGORY.items():
                 if k in note_str:
                     return v
                     
-        # 備考欄にも手がかりがなければ安全のため⑤その他とする
+        # 備考にも手がかりがなければ安全のため⑤その他とする
         logger.warning(f"Unknown item mapped to ⑤その他: {item_str}")
         return "⑤その他"
         
@@ -94,17 +106,10 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     def classify_route(row: Any) -> str:
         item_name = str(row.get("品名", ""))
         inout = str(row.get("自社他社区分", ""))
-        customer = str(row.get("得意先名", ""))
         transaction_type = str(row.get("取引区分", ""))
-        category = str(row.get("大品目分類", ""))
-        
-        if pd.notna(row.get("得意先名")) and customer.strip() not in ["", "None", "nan"]:
-            if "輸出" in customer or "輸出" in str(row.get("備考", "")):
-                return "輸出"
-            return "国内"
 
-        # 矛盾②対策: ④プラ類と⑤その他にはプレス枠がないためバラとして扱う
-        if "プレス" in item_name and category not in ("④プラ類", "⑤その他"):
+        # プレス品の判定競合を解消
+        if "プレス" in item_name:
             return "プレス品"
             
         if "持込" in transaction_type:
@@ -134,11 +139,26 @@ def transform_raw_data(df: pd.DataFrame) -> pd.DataFrame:
                 return sup
         return "そのた"
     
+    # ユーザー指摘：「管理会社(支払先名)と客先名(仕入先名)の混同」を修正
+    # 管理会社(支払先)が空白でない場合は管理会社を親として扱い、空白の場合は自社(仕入先)を親として扱う
+    df["管理会社名"] = df.apply(
+        lambda r: str(r.get("支払先名", "")).strip() if pd.notna(r.get("支払先名")) and str(r.get("支払先名", "")).strip() != "" else str(r.get("仕入先名", "")).strip(),
+        axis=1
+    )
+    
+    # 顧客キーとなる「仕入先名」を、管理会社名ベースの正規化された名前に上書きする
     df["仕入先名"] = df.apply(lambda r: map_supplier(
-        str(r.get("仕入先名", "")),
+        str(r.get("管理会社名", "")),
         bool(r.get("横持フラグ", False)),
         str(r.get("大品目分類", ""))
     ), axis=1)
+    
+    # 矛盾④(レイアウト破綻)対策: 「そのた」に集約された小口業者は、支払先名や運送店名が残っていると
+    # macro_reportのグループ化でバラバラに出力されてしまうためクリアする
+    mask_sonota = df["仕入先名"] == "そのた"
+    df.loc[mask_sonota, "支払先名"] = ""
+    df.loc[mask_sonota, "運送店名"] = ""
+    df.loc[mask_sonota, "得意先名"] = ""
     
     return df
 
@@ -175,7 +195,8 @@ MASTER_HIERARCHY: List[Any] = [
         "routes": [
             {"route_id": "1.持込み・バラ", "route_match": ["持込み"], "route_disp": "持込"},
             {"route_id": "2.引取り・バラ(自社)", "route_match": ["自社回収"], "route_disp": "自社回収"},
-            {"route_id": "3.引取り・バラ(他社)", "route_match": ["他社回収"], "route_disp": "他社回収"}
+            {"route_id": "3.引取り・バラ(他社)", "route_match": ["他社回収"], "route_disp": "他社回収"},
+            {"route_id": "4.プラ・プレス", "route_match": ["プレス品"], "route_disp": "プレス品"}
         ]
     },
     {
@@ -183,7 +204,8 @@ MASTER_HIERARCHY: List[Any] = [
         "routes": [
             {"route_id": "1.持込み・バラ", "route_match": ["持込み"], "route_disp": "持込"},
             {"route_id": "2.引取り・バラ(自社)", "route_match": ["自社回収"], "route_disp": "自社回収"},
-            {"route_id": "3.引取り・バラ(他社)", "route_match": ["他社回収"], "route_disp": "他社回収"}
+            {"route_id": "3.引取り・バラ(他社)", "route_match": ["他社回収"], "route_disp": "他社回収"},
+            {"route_id": "4.その他・プレス", "route_match": ["プレス品"], "route_disp": "プレス品"}
         ]
     },
     {
@@ -470,7 +492,11 @@ def build_micro_report(df: pd.DataFrame, target_year: Optional[int] = None, targ
                     else:
                         disp_supplier = str(keys_tuple[0])
                         
-                    right_side_data.append(["", disp_supplier, format_num(row_total)])
+                    if cat_id == "⑤その他" and len(keys_tuple) >= 4:
+                        disp_item = keys_tuple[3]
+                        right_side_data.append([disp_supplier, disp_item, format_num(row_total)])
+                    else:
+                        right_side_data.append([disp_supplier, "", format_num(row_total)])
                     
             subtotal: List[Any] = [None] * 41
             subtotal_label = f"{route_id.split('.')[-1]}合計" if "." in route_id else f"{route_id}合計"
