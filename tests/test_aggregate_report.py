@@ -56,7 +56,7 @@ def test_split_pipeline_and_shipping_classification() -> None:
     """入出荷の物理分離と出荷ルート（輸出/国内）判定の検証"""
     data = {
         "仕入先名": ["青木商店", "", ""],
-        "得意先名": ["", "JOP", "日本製紙（吉永工場"],
+        "得意先名": ["", "坪野谷紙業貿易部", "日本製紙（吉永工場"],
         "品名": ["段ボール", "古段(プレス)", "段ボールプレス"],
         "取引区分": ["持込", "売上", "売上"],
         "デ区": ["仕入", "売上", "売上"],
@@ -66,16 +66,16 @@ def test_split_pipeline_and_shipping_classification() -> None:
     }
     df = pd.DataFrame(data)
     df_inbound, df_outbound = transform_raw_data(df)
-    
+
     assert len(df_inbound) == 1
     assert df_inbound.loc[0, "store_name"] == "青木商店"
-    
+
     assert len(df_outbound) == 2
-    jop_row = df_outbound[df_outbound["client_name"] == "JOP"].iloc[0]
-    assert jop_row["経路分類"] == "1.輸出"
+    tsubonoya_row = df_outbound[df_outbound["client_name"] == "坪野谷紙業貿易部"].iloc[0]
+    assert tsubonoya_row["経路分類"] == "1.輸出"
     
-    np_row = df_outbound[df_outbound["client_name"].str.contains("日本製紙")].iloc[0]
-    assert np_row["経路分類"] == "2.国内"
+    nippon_row = df_outbound[df_outbound["client_name"].str.contains("日本製紙")].iloc[0]
+    assert nippon_row["経路分類"] == "2.国内"
 
 def test_directive_1_shipping_in_micro_report() -> None:
     """Directive 1: build_micro_report が df_outbound を用いて ＜出荷＞ セクションを完全生成すること"""

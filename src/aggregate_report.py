@@ -13,12 +13,7 @@ logger = logging.getLogger(__name__)
 
 YOKOMOCHI_KEYWORDS = ["(横持)"]
 
-# 輸出商社・海外向け特定キーワードリスト
-EXPORT_CLIENT_KEYWORDS: List[str] = [
-    "JOP", "東方物産", "東方トレーディング", "日商岩井", "VIPA", "輸出",
-    "美国中南日本", "中南", "阪和興業", "丸紅", "KPP", "三邦", "リニア", "JP",
-    "山發", "紙通商", "信一", "新東亜", "日本マテリオ", "坪野谷紙業貿易部", "貿易"
-]
+
 
 # 新しいマッピングの追加
 ITEM_TO_CATEGORY = {
@@ -77,16 +72,12 @@ def is_outbound_transaction(row: pd.Series) -> bool:
 
 def classify_outbound_route(row: pd.Series) -> str:
     """
-    出荷（売上）トランザクションを『1.輸出』または『2.国内』に確定分類する。
-    SHIPPING_HIERARCHYのroute_matchと完全同期させる。
+    出荷（売上）トランザクションを「1.輸出」または「2.国内」に分類する。
+    ユーザー指定により、輸出となる条件は得意先名が「坪野谷紙業貿易部」であることのみとする。
     """
     client = str(row.get("得意先名", "")).strip()
-    item_str = str(row.get("品名", "")).strip()
-    note_str = str(row.get("備考", "")).strip()
-    route_str = str(row.get("取引区分", "")).strip()
     
-    search_target = f"{client} {item_str} {note_str} {route_str}"
-    if any(kw in search_target for kw in EXPORT_CLIENT_KEYWORDS):
+    if "坪野谷紙業貿易部" in client:
         return "1.輸出"
     return "2.国内"
 
