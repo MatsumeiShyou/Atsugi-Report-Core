@@ -297,7 +297,17 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_outbound["client_name"] = df_outbound["得意先名"].fillna("").astype(str).str.strip()
     df_outbound["spec_name"] = df_outbound["品名"].fillna("").astype(str).str.strip()
     
+
+    # groupby 等で NaN により行が消滅するのを防ぐため、キーとなる列の NaN を空文字に置換
+    fill_cols = ["支払先名", "仕入先名", "運送店名", "品名", "得意先名", "client_name", "spec_name", "normalized_parent"]
+    for col in fill_cols:
+        if col in df_inbound.columns:
+            df_inbound[col] = df_inbound[col].fillna("")
+        if col in df_outbound.columns:
+            df_outbound[col] = df_outbound[col].fillna("")
+
     return df_inbound, df_outbound
+
 
 MASTER_HIERARCHY: List[Any] = [
     {
