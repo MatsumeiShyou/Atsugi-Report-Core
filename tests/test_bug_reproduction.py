@@ -225,3 +225,22 @@ def test_transform_raw_data_empty_df_crash() -> None:
     assert df_in.empty
     assert df_out.empty
 
+
+def test_export_classification_tsubonoya():
+    """
+    BUG_LOOP: Verify that '(株)坪野谷紙業貿易部' is correctly classified as Export (1.輸出).
+    Currently it falls back to '2.国内' because it's missing from the keywords.
+    """
+    from aggregate_report import classify_outbound_route
+    import pandas as pd
+    
+    # Simulate a row for outbound transaction
+    row = pd.Series({
+        "得意先名": "(株)坪野谷紙業貿易部",
+        "品名": "段ボールプレス",
+        "備考": "",
+        "取引区分": "出荷"
+    })
+    
+    route = classify_outbound_route(row)
+    assert route == "1.輸出", f"Expected '1.輸出', but got {route}"
