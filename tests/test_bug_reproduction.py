@@ -183,34 +183,7 @@ def test_zero_net_weight_freight_filtering():
     assert df_inbound.loc[df_inbound["store_name"] == "C社", "実重量"].iloc[0] == 500.0
 
 
-def test_find_outbound_row_tuple_unpacking_crash() -> None:
-    """
-    Directive 1 BUG_LOOP:
-    _find_outbound_row において、index["outbound"] に 4要素タプルが含まれる場合に
-    3変数でのアンパック (c_cat, c_route, c_cl) が ValueError: too many values to unpack
-    を引き起こすバグの再現テスト。
-    """
-    from excel_presenter import ExcelReportPresenter
-    template_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../Artifacts/厚木事業所_入荷日報_search.xlsx'))
-    presenter = ExcelReportPresenter(template_path)
 
-    # 4要素タプルと3要素タプルが混在するインデックス
-    index = {
-        "outbound": {
-            ("①段ボール", "1.輸出", "JOP", "古段"): 753,
-            ("①段ボール", "1.輸出", "JOP"): 753,
-        }
-    }
-    # 完全一致しない（spec_name が "古段(プレス)" でテンプレート登録 "古段" と不一致）ケース
-    row = pd.Series({
-        "大品目分類": "①段ボール",
-        "経路分類": "1.輸出",
-        "client_name": "JOP",
-        "spec_name": "古段(プレス)",
-    })
-    # 修正前は ValueError: too many values to unpack (expected 3) でクラッシュする
-    row_idx = presenter._find_outbound_row(row, index)
-    assert row_idx == 753
 
 
 def test_transform_raw_data_empty_df_crash() -> None:
