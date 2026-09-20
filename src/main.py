@@ -78,9 +78,26 @@ def main() -> None:
         sheet_name_macro = f"{sheet_name_micro}計"
         
         logger.info(f"対象年月: {target_year}年{target_month}月 (令和{reiwa_year}年)")
+        # --- アーキテクチャの根本解決: 上流での期間スライスと相殺伝票の完全パージ ---
+        target_period = pd.Period(f"{target_year:04d}-{target_month:02d}", freq="M")
         
-        macro_grid = build_macro_report(df_inbound, df_outbound, target_year=target_year, target_month=target_month)
-        micro_grid = build_micro_report(df_inbound, df_outbound, target_year=target_year, target_month=target_month)
+        def slice_by_period(df: pd.DataFrame, start_period, end_period) -> pd.DataFrame:
+            if df.empty or "transaction_date" not in df.columns: return df
+            temp_date = pd.to_datetime(df["transaction_date"], errors="coerce")
+            ym_series = temp_date.dt.to_period("M")
+            return df[(ym_series >= start_period) & (ym_series <= end_period)].copy()
+
+        macro_start = target_period - 12
+        df_macro_in = purge_zero_sum_groups(slice_by_period(df_inbound, macro_start, target_period), True)
+        df_macro_out = purge_zero_sum_groups(slice_by_period(df_outbound, macro_start, target_period), False)
+
+        df_micro_in = purge_zero_sum_groups(slice_by_period(df_inbound, target_period, target_period), True)
+        df_micro_out = purge_zero_sum_groups(slice_by_period(df_outbound, target_period, target_period), False)
+        # -----------------------------------------------------------------------------------------
+
+        
+        macro_grid = build_macro_report(df_macro_in, df_macro_out, target_year=target_year, target_month=target_month)
+        micro_grid = build_micro_report(df_micro_in, df_micro_out, target_year=target_year, target_month=target_month)
 
         warning_text = generate_warnings(df_inbound)
         if warning_text:
