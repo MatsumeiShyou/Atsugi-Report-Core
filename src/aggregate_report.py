@@ -445,6 +445,9 @@ def build_macro_report(
                 route_df = df_in[df_in["横持フラグ"] == True].copy()
             else:
                 route_df = df_in[(df_in["大品目分類"] == cat_id) & (df_in["経路分類"].isin(route_match_list)) & (df_in["横持フラグ"] == False)].copy()
+            if route_df.empty:
+                continue
+
             
             grid.append(["", route_id] + [None] * 14)
             
@@ -652,6 +655,9 @@ def build_micro_report(
                 route_df = df_in[df_in["横持フラグ"] == True].copy()
             else:
                 route_df = df_in[(df_in["大品目分類"] == cat_id) & (df_in["経路分類"].isin(route_match_list)) & (df_in["横持フラグ"] == False)].copy()
+            if route_df.empty:
+                continue
+
                 
             h_row: List[Any] = [None] * 41
             h_row[0] = f"{cat_disp}-{route_disp}"
