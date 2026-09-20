@@ -4,7 +4,7 @@ import os
 import sys
 
 CSV_PATH = r"Artifacts/仕入日報問合せ.csv"
-OUTPUT_FILE = r"Artifacts/マッピング不足候補リスト.md"
+OUTPUT_FILE = r"Artifacts/マッピング判定用_推測付き.csv"
 
 def normalize_text(text):
     if pd.isna(text): return ""
@@ -15,6 +15,19 @@ def safe_numeric(val):
         return float(str(val).replace(',', ''))
     except:
         return 0.0
+
+def guess_category(item_name):
+    # 1. 除外キーワード
+    ignore_kws = ["運搬", "加工賃", "手数料", "リース", "紹介料", "キャンセル"]
+    if any(k in item_name for k in ignore_kws):
+        return "除外"
+        
+    # 2. その他の推測（頻出）
+    sonota_kws = ["機密", "色上", "糊", "布類", "雑袋", "荷潰し", "軟質", "アルミ", "鉄", "切茶", "パルプ", "巻取", "ペーパー"]
+    if any(k in item_name for k in sonota_kws):
+        return "⑤その他"
+        
+    return "" # 推測できない場合は空欄
 
 def main():
     df_csv = pd.read_csv(CSV_PATH, encoding='cp932', low_memory=False)
@@ -44,18 +57,19 @@ def main():
         unknown_items_summary[item_name]["count"] += 1
         unknown_items_summary[item_name]["total_weight"] += total_weight
 
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-        f.write("# 未登録品名 抽出レポート（総重量付き）\n\n")
-        f.write("本レポートは、システムが知らない「未登録の品名」を抽出し、その総重量を付記したものです。\n")
-        f.write("金額調整の項目であってもシステム上は重量（架空の重量）が発生するため、総重量だけで本物の荷物か金額調整かを自動判定することはできません。\n")
-        f.write("人間がこのリストを見て、「これは本物の荷物だから登録する」「これは運搬料や加工賃だから除外リストに入れる」と判断するためのアシスト資料です。\n\n")
+    data = []
+    for item, stats in sorted(unknown_items_summary.items(), key=lambda x: x[1]["total_weight"], reverse=True):
+        guessed = guess_category(item)
+        data.append({
+            "品名": item,
+            "出現回数": stats["count"],
+            "総重量(kg)": int(stats["total_weight"]),
+            "判定（分類名または除外）": guessed
+        })
         
-        f.write("## 1. システム未登録の品名と、それによって発生している重量\n")
-        
-        for item, stats in sorted(unknown_items_summary.items(), key=lambda x: x[1]["total_weight"], reverse=True):
-            f.write(f"- **{item}** (出現回数: {stats['count']}回, 総重量: {stats['total_weight']:,.0f} kg)\n")
-
-    print(f"抽出完了！レポートを {OUTPUT_FILE} に出力しました。")
+    df_out = pd.DataFrame(data)
+    df_out.to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
+    print(f"判定用CSVを {OUTPUT_FILE} に出力しました。推測値アシスト付き。")
 
 if __name__ == '__main__':
     main()
