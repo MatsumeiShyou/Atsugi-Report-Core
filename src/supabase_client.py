@@ -33,7 +33,7 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
             "transaction_date", "仕入先コード", "仕入先名", "品名コード", "品名", 
             "経路", "車番", "正味重量", "調整重量", "数量", 
             "単価", "金額", "備考", "受付時間", "伝票番号",
-            "支払先名", "運送店名", "自社他社区分", "得意先名", "取引区分"
+            "支払先名", "運送店名", "自社他社区分", "得意先名", "取引区分", "デ区"
         }
         
     # CSVのヘッダーに含まれる全角・半角スペースを完全に除去
@@ -66,11 +66,16 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
 def extract_from_db() -> pd.DataFrame:
     client = get_supabase_client()
     
+    res = client.table("raw_nyuka_data").select("source_file").like("source_file", "%_completed").order("source_file", desc=True).limit(1).execute()
+    if not res.data or not isinstance(res.data, list) or not isinstance(res.data[0], dict):
+        return pd.DataFrame()
+    latest_source = str(res.data[0].get("source_file", ""))
+    
     data = []
     limit = 1000
     offset = 0
     while True:
-        res = client.table("raw_nyuka_data").select("*").range(offset, offset + limit - 1).execute()
+        res = client.table("raw_nyuka_data").select("*").eq("source_file", latest_source).range(offset, offset + limit - 1).execute()
         if not res.data:
             break
         data.extend(res.data)
@@ -79,3 +84,7 @@ def extract_from_db() -> pd.DataFrame:
         offset += limit
         
     return pd.DataFrame(data)
+
+def mark_as_completed(old_source: str, new_source: str) -> None:
+    client = get_supabase_client()
+    client.table("raw_nyuka_data").update({"source_file": new_source}).eq("source_file", old_source).execute()

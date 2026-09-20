@@ -22,10 +22,10 @@ def test_mochikomi_bug():
     }
     df = pd.DataFrame(data)
     
-    transformed = transform_raw_data(df)
+    df_inbound, _ = transform_raw_data(df)
     
-    # 経路分類は「持込み」になるはずだが、現行ロジックでは「他社回収」になってしまう
-    assert transformed.loc[0, "経路分類"] == "持込み", f"Expected '持込み', got {transformed.loc[0, '経路分類']}"
+    # 経路分類は「持込み」になるはず
+    assert df_inbound.loc[0, "経路分類"] == "持込み", f"Expected '持込み', got {df_inbound.loc[0, '経路分類']}"
 
 
 def test_macro_p_column_is_diff_not_total() -> None:
@@ -75,8 +75,8 @@ def test_macro_p_column_is_diff_not_total() -> None:
         })
 
     df = pd.DataFrame(rows)
-    transformed = transform_raw_data(df)
-    macro = build_macro_report(transformed)
+    df_inbound, df_outbound = transform_raw_data(df)
+    macro = build_macro_report(df_inbound, df_outbound, target_year=2026, target_month=5)
 
     # ヘッダー行のP列が「前年同月差分」であること
     header = macro[0]
@@ -119,9 +119,9 @@ def test_sonota_category_preserves_supplier_name() -> None:
         "transaction_date": ["2026-09-01", "2026-09-01"],
     }
     df = pd.DataFrame(data)
-    transformed = transform_raw_data(df)
-    assert transformed.loc[0, "仕入先名"] == "A社"
-    assert transformed.loc[1, "仕入先名"] == "B社"
+    df_inbound, _ = transform_raw_data(df)
+    assert df_inbound.loc[0, "store_name"] == "A社"
+    assert df_inbound.loc[1, "store_name"] == "B社"
 
 def test_plastic_press_not_lost() -> None:
     from aggregate_report import transform_raw_data
@@ -137,8 +137,8 @@ def test_plastic_press_not_lost() -> None:
         "transaction_date": ["2026-09-01"],
     }
     df = pd.DataFrame(data)
-    transformed = transform_raw_data(df)
-    assert transformed.loc[0, "経路分類"] == "プレス品"
+    df_inbound, _ = transform_raw_data(df)
+    assert df_inbound.loc[0, "経路分類"] == "プレス品"
 
 def test_hybrid_adjustment_logic() -> None:
     import pandas as pd
@@ -155,26 +155,73 @@ def test_hybrid_adjustment_logic() -> None:
         "transaction_date": ["2026-09-01", "2026-09-01"],
     }
     df = pd.DataFrame(data)
-    transformed = transform_raw_data(df)
+    df_inbound, _ = transform_raw_data(df)
     # 案3: 備考欄に「段ボール」とあるため、品名が「値引き」でも①段ボールになるべき
-    assert transformed.loc[0, "大品目分類"] == "①段ボール"
+    assert df_inbound.loc[0, "大品目分類"] == "①段ボール"
     # 救済不可: 備考欄もなく事前登録もない場合は安全に⑤その他になるべき
-    assert transformed.loc[1, "大品目分類"] == "⑤その他"
+    assert df_inbound.loc[1, "大品目分類"] == "⑤その他"
 
 
-def test_zero_net_weight_filtering():
-    import sys
-    sys.path.insert(0, 'src')
+def test_zero_net_weight_freight_filtering():
+    """
+    U-NET等の月末運賃・補助金精算伝票（正味重量=0、調整重量>0）は非物理伝票として
+    集計から除外されなければならない（二重計上防止）。
+    一方、正当な水分・品質控除（正味=0, 調整<0）や現品入荷（正味>0）は保持されること。
+    """
     from aggregate_report import transform_raw_data
     import pandas as pd
     df = pd.DataFrame([
-        {'仕入先名': 'A', '品名': '段ボール', '正味重量': '0', '調整重量': '1,000'},
-        {'仕入先名': 'B', '品名': '段ボール', '正味重量': '0', '調整重量': '-210'},
-        {'仕入先名': 'C', '品名': '段ボール', '正味重量': '500', '調整重量': '0'}
+        {'仕入先名': '(株)U-NET', '支払先名': '(株)U-NET', '品名': '段ボール', '正味重量': '0', '調整重量': '81,410', '取引区分': '持込'},
+        {'仕入先名': 'B社', '支払先名': 'B社', '品名': '段ボール', '正味重量': '0', '調整重量': '-210', '取引区分': '持込'},
+        {'仕入先名': 'C社', '支払先名': 'C社', '品名': '段ボール', '正味重量': '500', '調整重量': '0', '取引区分': '持込'}
     ])
-    result = transform_raw_data(df)
-    # 修正仕様: 正味0・調整プラスのデータも除外されず3件すべて保持されること
-    assert len(result) == 3
-    assert result.loc[0, '実重量'] == 1000.0
-    assert result.loc[1, '実重量'] == -210.0
-    assert result.loc[2, '実重量'] == 500.0
+    df_inbound, _ = transform_raw_data(df)
+    # U-NET伝票が除外され、B社（控除）とC社（現品）の2件のみ残ること
+    assert len(df_inbound) == 2
+    assert "(株)U-NET" not in df_inbound["store_name"].values
+    assert df_inbound.loc[df_inbound["store_name"] == "B社", "実重量"].iloc[0] == -210.0
+    assert df_inbound.loc[df_inbound["store_name"] == "C社", "実重量"].iloc[0] == 500.0
+
+
+def test_find_outbound_row_tuple_unpacking_crash() -> None:
+    """
+    Directive 1 BUG_LOOP:
+    _find_outbound_row において、index["outbound"] に 4要素タプルが含まれる場合に
+    3変数でのアンパック (c_cat, c_route, c_cl) が ValueError: too many values to unpack
+    を引き起こすバグの再現テスト。
+    """
+    from excel_presenter import ExcelReportPresenter
+    template_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../Artifacts/厚木事業所_入荷日報_search.xlsx'))
+    presenter = ExcelReportPresenter(template_path)
+
+    # 4要素タプルと3要素タプルが混在するインデックス
+    index = {
+        "outbound": {
+            ("①段ボール", "1.輸出", "JOP", "古段"): 753,
+            ("①段ボール", "1.輸出", "JOP"): 753,
+        }
+    }
+    # 完全一致しない（spec_name が "古段(プレス)" でテンプレート登録 "古段" と不一致）ケース
+    row = pd.Series({
+        "大品目分類": "①段ボール",
+        "経路分類": "1.輸出",
+        "client_name": "JOP",
+        "spec_name": "古段(プレス)",
+    })
+    # 修正前は ValueError: too many values to unpack (expected 3) でクラッシュする
+    row_idx = presenter._find_outbound_row(row, index)
+    assert row_idx == 753
+
+
+def test_transform_raw_data_empty_df_crash() -> None:
+    """
+    Directive 2 BUG_LOOP:
+    transform_raw_data に空の DataFrame を渡した際、KeyError: '仕入先名' 等で
+    クラッシュせず、(空df, 空df) が安全に返却されることを検証するバグ再現テスト。
+    """
+    from aggregate_report import transform_raw_data
+    df_empty = pd.DataFrame()
+    df_in, df_out = transform_raw_data(df_empty)
+    assert df_in.empty
+    assert df_out.empty
+

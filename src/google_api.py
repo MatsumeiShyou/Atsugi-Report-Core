@@ -29,6 +29,20 @@ def exponential_backoff_with_jitter(max_retries: int = 5, base_delay: float = 1.
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
+                    error_type = type(e).__name__
+                    if error_type in ["ValueError", "DefaultCredentialsError", "RefreshError", "FileNotFoundError"] or "auth" in error_type.lower():
+                        logger.error(f"再試行不可能なエラーが発生しました: {e}")
+                        raise
+                    
+                    if hasattr(e, "resp") and hasattr(e.resp, "status"):
+                        if 400 <= e.resp.status < 500 and e.resp.status != 429:
+                            logger.error(f"再試行不可能なHTTPエラーが発生しました: {e}")
+                            raise
+                    if hasattr(e, "response") and hasattr(e.response, "status_code"):
+                        if 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                            logger.error(f"再試行不可能なAPIエラーが発生しました: {e}")
+                            raise
+
                     if retries >= max_retries:
                         logger.error(f"最大リトライ回数に達しました: {e}")
                         raise
@@ -114,7 +128,7 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
     return dataframes
 
 @exponential_backoff_with_jitter(max_retries=3)
-def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1) -> None:
+def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1, warning_text: str = "") -> None:
     """集計済みDataFrameをスプレッドシートに部分書き込み（非破壊）する"""
     spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
     if not spreadsheet_id:
@@ -128,16 +142,27 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1) -> No
     
     try:
         wks = sh.worksheet(sheet_name)
+        wks.clear() # 過去の出力残骸（一番下の総合計など）が残らないようクリアする
     except Exception as e:
         if "WorksheetNotFound" in str(type(e).__name__):
             logger.info(f"シート '{sheet_name}' が見つからないため作成します。")
-            wks = sh.add_worksheet(title=sheet_name, rows=1000, cols=40)
+            wks = sh.add_worksheet(title=sheet_name, rows=1000, cols=50)
         else:
             raise
 
-    # テンプレート（見出し・数式）を破壊しないよう、Noneでない値のみを gspread.Cell に変換
+    # データを gspread.Cell に変換 (Noneは除外)
     cells = []
     grid = df.values.tolist()
+    if warning_text:
+        warning_lines = warning_text.split('\n')
+        grid.insert(0, [])
+        for line in reversed(warning_lines):
+            grid.insert(0, [line])
+    if warning_text:
+        warning_lines = warning_text.split('\n')
+        grid.insert(0, [])
+        for line in reversed(warning_lines):
+            grid.insert(0, [line])
     for r_idx, row in enumerate(grid):
         for c_idx, val in enumerate(row):
             if pd.notna(val) and val is not None:
