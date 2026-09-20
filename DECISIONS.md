@@ -18,3 +18,9 @@
 
 ---
 
+## AG-0001 2026-09-20 openpyxlの追加
+- choice: A
+- scope: requirements.txt
+- alternative: 無し（CIでエラーが発生しているための緊急バグ修正）
+- reason: ユーザーからのエラー報告（ModuleNotFoundError: No module named 'openpyxl'）に対する依存関係の補完
+- approved-by: human

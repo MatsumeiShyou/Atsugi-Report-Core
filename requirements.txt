@@ -6,3 +6,4 @@ python-dotenv==1.2.3
 supabase==2.31.0
 mypy==1.10.0
 pytest==8.2.0
+openpyxl>=3.0.0
