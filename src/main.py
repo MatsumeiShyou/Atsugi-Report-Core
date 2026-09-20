@@ -29,14 +29,20 @@ def main() -> None:
     logger.info("Supabaseへ生データを保存します...")
     combined_raw = pd.concat(dataframes, ignore_index=True)
     import datetime
-    from supabase_client import mark_as_completed
+    from supabase_client import get_supabase_client
     run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    source_loading = f"{run_id}_loading"
     source_completed = f"{run_id}_completed"
     
-    combined_raw["source_file"] = source_loading
-    load_to_db(combined_raw, source_file=source_loading)
-    mark_as_completed(source_loading, source_completed)
+    combined_raw["source_file"] = source_completed
+    try:
+        load_to_db(combined_raw, source_file=source_completed)
+    except Exception as e:
+        logger.error(f"DBへの保存中にエラーが発生しました。ロールバックします: {e}")
+        try:
+            get_supabase_client().table("raw_nyuka_data").delete().eq("source_file", source_completed).execute()
+        except:
+            pass
+        raise e
 
     # [T] Transform (Split-Pipeline Pattern: Inbound / Outbound Physical Separation)
     logger.info("Supabaseからデータを抽出し、変換処理を行います...")
