@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 from google_api import fetch_csv_from_drive, write_to_sheets
 from supabase_client import load_to_db, extract_from_db
-from aggregate_report import transform_raw_data, build_macro_report, build_micro_report, generate_warnings
+from aggregate_report import transform_raw_data, build_macro_report, build_micro_report, generate_warnings, purge_zero_sum_groups
 from excel_presenter import ExcelReportPresenter
 
 load_dotenv()
@@ -112,8 +112,8 @@ def main() -> None:
         try:
             presenter = ExcelReportPresenter(template_path)
             presenter.render_monthly_report(
-                df_inbound=df_inbound,
-                df_outbound=df_outbound,
+                df_inbound=df_micro_in,
+                df_outbound=df_micro_out,
                 target_year=target_year,
                 target_month=target_month,
                 output_path=output_excel_path

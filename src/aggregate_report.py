@@ -82,6 +82,37 @@ def classify_outbound_route(row: pd.Series) -> str:
         return "1.輸出"
     return "2.国内"
 
+
+def purge_zero_sum_groups(df: pd.DataFrame, is_inbound: bool) -> pd.DataFrame:
+    '''
+    期間スライス済みのデータフレームを受け取り、
+    指定された期間（当月のみ、あるいは13ヶ月間など）の全期間を通じて
+    実重量の合計が 0 となる業者（および品名・経路）のグループを
+    完全に除外（パージ）する。
+    これにより、下流の出力関数でのゼロ除外パッチが不要になる。
+    '''
+    if df.empty:
+        return df
+        
+    temp_df = df.copy()
+    if is_inbound:
+        group_keys = ["normalized_parent", "大品目分類", "経路分類", "品名"]
+    else:
+        group_keys = ["client_name", "大品目分類", "経路分類", "spec_name"]
+        
+    actual_keys = [k for k in group_keys if k in temp_df.columns]
+    
+    if not actual_keys:
+        return df
+
+    # グループごとの合計重量を計算し、全行にブロードキャスト
+    sums_per_row = temp_df.groupby(actual_keys, dropna=False)["実重量"].transform("sum")
+    
+    # 合計が 0 ではない行（意味のある実績データ）のみを残す
+    keep_mask = sums_per_row != 0
+    return df[keep_mask].copy()
+
+
 def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     生データをクレンジングし、入出荷物理分離（Split-Pipeline Pattern）を行って
@@ -511,27 +542,17 @@ def build_macro_report(
                         ym_sums = supp_df.groupby("_ym")["実重量"].sum()
                         val_last_year = 0.0
                         val_this_month = 0.0
-                        row_has_nonzero = False
                         for ym_val, weight in ym_sums.items():
                             ym = cast(pd.Period, ym_val)
                             if ym in ym_to_col:
-                                w = float(weight)
                                 c_idx = ym_to_col[ym]
-                                ship_row_data[c_idx] = format_num(w)
-                                route_totals[c_idx - 2] += w
-                                if w != 0:
-                                    row_has_nonzero = True
-                                if ym == unique_yms[0]: val_last_year = w
-                                elif ym == unique_yms[12]: val_this_month = w
-                        
-                        diff = val_this_month - val_last_year
-                        ship_row_data[15] = format_num(diff)
-                        route_totals[13] += diff
-                        if diff != 0:
-                            row_has_nonzero = True
-                            
-                        if row_has_nonzero:
-                            grid.append(ship_row_data)
+                                ship_row_data[c_idx] = format_num(float(weight))
+                                route_totals[c_idx - 2] += float(weight)
+                                if ym == unique_yms[0]: val_last_year = float(weight)
+                                elif ym == unique_yms[12]: val_this_month = float(weight)
+                        ship_row_data[15] = format_num(val_this_month - val_last_year)
+                        route_totals[13] += (val_this_month - val_last_year)
+                        grid.append(ship_row_data)
                         
                 ship_subtotal: List[Any] = [None] * 16
                 ship_subtotal[1] = f"{route_disp}合計"
