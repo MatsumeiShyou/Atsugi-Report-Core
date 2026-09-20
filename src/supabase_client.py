@@ -6,6 +6,9 @@ from supabase import create_client, Client # type: ignore
 
 logger = logging.getLogger(__name__)
 
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
 def get_supabase_client() -> Client:
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
