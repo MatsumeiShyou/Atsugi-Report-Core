@@ -145,9 +145,18 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     mask_exclude_item = item_str.str.contains("|".join(exclude_item_keywords).upper(), na=False, regex=True)
     mask_exclude_vendor = supp_str.str.contains("|".join(exclude_vendor_keywords).upper(), na=False, regex=True) | \
                           payee_str.str.contains("|".join(exclude_vendor_keywords).upper(), na=False, regex=True)
-    
+                          
+    mask_exclude = mask_exclude_item | mask_exclude_vendor
+
+    # ホワイトリスト（許可）はブラックリスト（除外）よりも優先される（救済）
+    if white_list:
+        mask_white_item = item_str.str.contains("|".join(white_list).upper(), na=False, regex=True)
+        mask_white_vendor = supp_str.str.contains("|".join(white_list).upper(), na=False, regex=True) | \
+                            payee_str.str.contains("|".join(white_list).upper(), na=False, regex=True)
+        mask_exclude = mask_exclude & ~(mask_white_item | mask_white_vendor)
+
     # 除外確定
-    df = df[~(mask_exclude_item | mask_exclude_vendor)].copy()
+    df = df[~mask_exclude].copy()
 
     # --- 実重量の計算 (文字列からのカンマ削除・数値変換を安全に行う) ---
     raw_net_s = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
