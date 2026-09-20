@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 src/excel_presenter.py
 
@@ -69,6 +69,8 @@ class ExcelReportPresenter:
             )
             # 横計（総合計）
             pivot_in["合計"] = pivot_in.sum(axis=1)
+            # 合計が0の行（意味のない行）を除外
+            pivot_in = pivot_in[pivot_in["合計"] != 0].copy()
         else:
             pivot_in = pd.DataFrame()
 
@@ -90,6 +92,8 @@ class ExcelReportPresenter:
                 fill_value=0
             )
             pivot_out["合計"] = pivot_out.sum(axis=1)
+            # 合計が0の行（意味のない行）を除外
+            pivot_out = pivot_out[pivot_out["合計"] != 0].copy()
         else:
             pivot_out = pd.DataFrame()
 
