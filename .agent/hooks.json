@@ -1,9 +1,15 @@
-{
+﻿{
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "write_to_file|create_file|replace_file_content|edit_file",
         "command": "python -c \"import sys, subprocess, json; res = subprocess.run(['python', '.agent/scripts/alternative_gate.py'], input=sys.stdin.read(), text=True, capture_output=True); print(json.dumps({'decision': 'deny' if res.returncode != 0 else 'allow', 'reason': res.stderr}))\""
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python .agent/scripts/enforce_commit_prompt.py"
       }
     ]
   },
