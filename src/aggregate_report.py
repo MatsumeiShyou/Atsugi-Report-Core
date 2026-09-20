@@ -123,29 +123,58 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     elif "ヤード名" in df.columns:
         df = df[df["ヤード名"].astype(str).str.contains("厚木", na=False)].copy()
         
-    # 非重量商品（運搬料や取扱手数料など）の除外
-    if "品名" in df.columns:
-        df = df[~df["品名"].astype(str).str.contains("運搬|取扱|手数料|加工賃|紹介料|リース|機密 ブリヂストン~丸富製紙|機密 ブリヂストン~鶴見沼津", na=False)].copy()
-        
-    # --- 非物理会計調整伝票の除外ゲート（U-NET月末運賃・補助金伝票の二重計上防止） ---
-    raw_net = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-    payee_str = df.get("支払先名", pd.Series([""]*len(df))).astype(str)
-    supp_str = df.get("仕入先名", pd.Series([""]*len(df))).astype(str)
-    item_str = df.get("品名", pd.Series([""]*len(df))).astype(str)
+    # --- 1. 明示的な除外（人間が定義した除外キーワード） ---
+    # ※全角半角・カタカナの揺れは上部の NFKC 正規化で吸収済み。
+    # ※大文字小文字の揺れを吸収するため、全て upper() にして比較する。
+    try:
+        from supabase_client import fetch_rule_master
+        rules_db = fetch_rule_master()
+        black_list = rules_db.get("BLACK", [])
+        white_list = rules_db.get("WHITE", [])
+    except Exception:
+        black_list = []
+        white_list = []
+
+    exclude_item_keywords = ["運搬", "取扱", "手数料", "加工賃", "紹介料", "リース", "機密 ブリヂストン~丸富製紙", "機密 ブリヂストン~鶴見沼津", "補助金"] + black_list
+    exclude_vendor_keywords = ["U-NET", "ユーネット", "運賃", "運搬補助"] + black_list
+
+    item_str = df.get("品名", pd.Series([""]*len(df))).astype(str).str.upper()
+    supp_str = df.get("仕入先名", pd.Series([""]*len(df))).astype(str).str.upper()
+    payee_str = df.get("支払先名", pd.Series([""]*len(df))).astype(str).str.upper()
+
+    mask_exclude_item = item_str.str.contains("|".join(exclude_item_keywords).upper(), na=False, regex=True)
+    mask_exclude_vendor = supp_str.str.contains("|".join(exclude_vendor_keywords).upper(), na=False, regex=True) | \
+                          payee_str.str.contains("|".join(exclude_vendor_keywords).upper(), na=False, regex=True)
     
-    mask_non_physical = (
-        (raw_net == 0) &
-        (
-            payee_str.str.contains("U-NET|ユーネット", na=False) |
-            supp_str.str.contains("U-NET|ユーネット|運賃|運搬補助", na=False) |
-            item_str.str.contains("運賃|運搬補助|補助金", na=False)
-        )
-    )
-    df = df[~mask_non_physical].copy()
+    # 除外確定
+    df = df[~(mask_exclude_item | mask_exclude_vendor)].copy()
 
     # --- 実重量の計算 (文字列からのカンマ削除・数値変換を安全に行う) ---
-    df["実重量"] = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0) + \
-                 pd.to_numeric(df.get("調整重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    raw_net_s = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    raw_adj_s = pd.to_numeric(df.get("調整重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    df["実重量"] = raw_net_s + raw_adj_s
+
+    # --- 2. 怪しいデータの検知と警告（システムが人間に判断を仰ぐ） ---
+    # 金額や単価がゼロ、または正味重量がゼロの伝票はダミー（調整）の可能性が高いため、ログに出力して人間に知らせる。
+    if "金額" in df.columns:
+        amt_s = pd.to_numeric(df["金額"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+        suspicious_mask = ((amt_s == 0) & (df["実重量"] > 0)) | ((raw_net_s == 0) & (raw_adj_s != 0))
+        
+        # ホワイトリストに登録されているものは警告から外す
+        if white_list:
+            mask_white_item = df.get("品名", pd.Series([""]*len(df))).astype(str).str.upper().str.contains("|".join(white_list), na=False, regex=True)
+            mask_white_vendor = df.get("仕入先名", pd.Series([""]*len(df))).astype(str).str.upper().str.contains("|".join(white_list), na=False, regex=True)
+            suspicious_mask = suspicious_mask & ~(mask_white_item | mask_white_vendor)
+            
+        suspicious_df = df[suspicious_mask]
+        if not suspicious_df.empty:
+            print("\n[WARNING] 以下の伝票は金額ゼロまたは正味重量ゼロのため、除外すべきダミー伝票の可能性があります。")
+            print("事務員様にて内容をご確認いただき、除外すべき場合はシステム(Supabase)の rule_master テーブルへ BLACK としてご登録ください。")
+            print("正規の資源であり集計を通す場合は WHITE としてご登録ください。次回以降アラートが出なくなります。")
+            for _, row in suspicious_df.iterrows():
+                print(f"  - 仕入先: {row.get('仕入先名', '')}, 品名: {row.get('品名', '')}, 実重量: {row.get('実重量', 0)}kg, 金額: {row.get('金額', 0)}円")
+            print("--------------------------------------------------------------------------------")
+
 
     # --- 入出荷物理分離（Split-Pipeline Pattern） ---
     is_outbound_mask = df.apply(is_outbound_transaction, axis=1)
