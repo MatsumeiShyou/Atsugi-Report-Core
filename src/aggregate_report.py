@@ -511,17 +511,27 @@ def build_macro_report(
                         ym_sums = supp_df.groupby("_ym")["実重量"].sum()
                         val_last_year = 0.0
                         val_this_month = 0.0
+                        row_has_nonzero = False
                         for ym_val, weight in ym_sums.items():
                             ym = cast(pd.Period, ym_val)
                             if ym in ym_to_col:
+                                w = float(weight)
                                 c_idx = ym_to_col[ym]
-                                ship_row_data[c_idx] = format_num(float(weight))
-                                route_totals[c_idx - 2] += float(weight)
-                                if ym == unique_yms[0]: val_last_year = float(weight)
-                                elif ym == unique_yms[12]: val_this_month = float(weight)
-                        ship_row_data[15] = format_num(val_this_month - val_last_year)
-                        route_totals[13] += (val_this_month - val_last_year)
-                        grid.append(ship_row_data)
+                                ship_row_data[c_idx] = format_num(w)
+                                route_totals[c_idx - 2] += w
+                                if w != 0:
+                                    row_has_nonzero = True
+                                if ym == unique_yms[0]: val_last_year = w
+                                elif ym == unique_yms[12]: val_this_month = w
+                        
+                        diff = val_this_month - val_last_year
+                        ship_row_data[15] = format_num(diff)
+                        route_totals[13] += diff
+                        if diff != 0:
+                            row_has_nonzero = True
+                            
+                        if row_has_nonzero:
+                            grid.append(ship_row_data)
                         
                 ship_subtotal: List[Any] = [None] * 16
                 ship_subtotal[1] = f"{route_disp}合計"
