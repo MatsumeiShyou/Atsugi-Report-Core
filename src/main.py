@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import logging
 import pandas as pd
@@ -112,10 +112,12 @@ def main() -> None:
         write_to_sheets(micro_df, sheet_name=sheet_name_micro, start_col=1, warning_text=warning_text)
 
         # [L] Directive 4: Generate Audit-Grade Excel Ledger
-        template_path = os.environ.get(
-            "EXCEL_TEMPLATE_PATH",
-            os.path.join(os.path.dirname(__file__), "..", "Artifacts", "厚木事業所_入荷日報_search.xlsx")
-        )
+        from supabase_client import download_template_from_storage
+        bucket_name = os.environ.get("SUPABASE_TEMPLATE_BUCKET", "report-templates")
+        template_file_name = os.environ.get("TEMPLATE_FILE_NAME", "atsugi_template.xlsx")
+        template_path = os.environ.get("EXCEL_TEMPLATE_PATH")
+        if not template_path:
+            template_path = download_template_from_storage(bucket_name, template_file_name)
         output_excel_dir = os.environ.get(
             "EXCEL_OUTPUT_DIR",
             os.path.join(os.path.dirname(__file__), "..", "output")
