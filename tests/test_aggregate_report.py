@@ -39,11 +39,11 @@ def test_transform_and_coordinate_mapping() -> None:
     
     micro = build_micro_report(df_inbound, df_outbound, target_year=2026, target_month=9)
     
-    # ミクロレポートで青木商店を探す（Directive 1: 品名が保持されること）
+    # ミクロレポートで青木商店を探す（Directive 1撤去: 品名が空欄になること）
     found_micro_aoki = False
     for row in micro:
         if len(row) > 36 and row[1] == "青木商店" and row[4] == "持込":
-            assert row[3] == "段ボール", f"Expected 品名 '段ボール', got '{row[3]}'"
+            assert row[3] == "", f"Expected 品名 '', got '{row[3]}'"
             # Day 1 は F列 (index 5)
             assert row[5] == "900"
             # 行合計は AK列 (index 36)

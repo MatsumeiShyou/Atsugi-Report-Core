@@ -168,7 +168,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         white_list = []
 
     exclude_item_keywords = ["運搬", "取扱", "手数料", "加工賃", "紹介料", "リース", "機密 ブリヂストン~丸富製紙", "機密 ブリヂストン~鶴見沼津", "補助金"] + black_list
-    exclude_vendor_keywords = ["U-NET", "ユーネット", "運賃", "運搬補助"] + black_list
+    exclude_vendor_keywords = ["U-NET", "ユーネット", "運賃", "運搬"] + black_list
 
     item_str = df.get("品名", pd.Series([""]*len(df))).astype(str).str.upper()
     supp_str = df.get("仕入先名", pd.Series([""]*len(df))).astype(str).str.upper()
@@ -179,6 +179,10 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
                           payee_str.str.contains("|".join(exclude_vendor_keywords).upper(), na=False, regex=True)
                           
     mask_exclude = mask_exclude_item | mask_exclude_vendor
+
+    # アンビエンテの仕入調整（非重量伝票）を除外
+    mask_ambiente_dummy = (df["仕入先名"].str.contains("アンビエンテ|ｱﾝﾋﾞｴﾝﾃ", na=False)) & (df["デ区"] == "仕入調整")
+    mask_exclude = mask_exclude | mask_ambiente_dummy
 
     # ホワイトリスト（許可）はブラックリスト（除外）よりも優先される（救済）
     if white_list:
@@ -699,7 +703,7 @@ def build_micro_report(
                             r_data[0] = keys_tuple[0] 
                             r_data[1] = keys_tuple[1] 
                             r_data[2] = keys_tuple[2] 
-                            r_data[3] = keys_tuple[3]  # Directive 1: PRESERVED for all categories!
+                            r_data[3] = "" if cat_id != "⑤その他" else keys_tuple[3]
                         else:
                             r_data[0] = str(keys_tuple[0])
                             r_data[3] = str(keys_tuple[1]) if len(keys_tuple) > 1 else ""
