@@ -5,8 +5,7 @@ import unicodedata
 import datetime
 
 # --- 主要取引先リスト ---
-from mapping_definitions import MAJOR_CLIENTS_LIST, ITEM_CATEGORY_MAP, CLIENT_NAME_MAP
-MAJOR_CLIENTS = set(MAJOR_CLIENTS_LIST)
+from mapping_definitions import ITEM_CATEGORY_MAP
 # ---------------------------------------------------
 
 logger = logging.getLogger(__name__)
