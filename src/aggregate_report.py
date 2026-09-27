@@ -5,7 +5,7 @@ import unicodedata
 import datetime
 
 # --- 主要取引先リスト ---
-from mapping_definitions import MAJOR_CLIENTS_LIST, ITEM_CATEGORY_MAP
+from mapping_definitions import MAJOR_CLIENTS_LIST, ITEM_CATEGORY_MAP, CLIENT_NAME_MAP
 MAJOR_CLIENTS = set(MAJOR_CLIENTS_LIST)
 # ---------------------------------------------------
 
@@ -250,11 +250,14 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         if is_yokomochi or not sup: return sup
         if category == "⑤その他": return sup
         norm_sup = normalize_client_name(sup)
+        if norm_sup in CLIENT_NAME_MAP:
+            return CLIENT_NAME_MAP[norm_sup]
+        # Fallback
         for mc in MAJOR_CLIENTS:
             if not mc: continue
             if normalize_client_name(mc) in norm_sup or norm_sup in normalize_client_name(mc):
                 return mc
-        return "そのた"
+        return "その他（未分類）"
     
     df_inbound["store_name"] = df_inbound["仕入先名"].fillna("").astype(str).str.strip()
     df_inbound["payee_name"] = df_inbound["支払先名"].fillna("").astype(str).str.strip()

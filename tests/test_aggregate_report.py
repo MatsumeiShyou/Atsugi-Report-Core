@@ -30,7 +30,7 @@ def test_transform_and_coordinate_mapping() -> None:
     # マクロレポートで青木商店を探す
     found_macro_aoki = False
     for row in macro:
-        if row[0] == "" and row[1] == "青木商店":
+        if row[0] == "" and row[1] == "㈲青木商店":
             # 当月(2026-09)はインデックス14 (Col 14)
             assert row[14] == "900"
             found_macro_aoki = True
@@ -42,7 +42,7 @@ def test_transform_and_coordinate_mapping() -> None:
     # ミクロレポートで青木商店を探す
     found_micro_aoki = False
     for row in micro:
-        if len(row) > 36 and row[2] == "青木商店" and row[1] == "持込み":
+        if len(row) > 36 and row[2] == "㈲青木商店" and row[1] == "持込み":
             assert row[3] == "", f"Expected 品名 '', got '{row[3]}'"
             # Day 1 は F列 (index 5)
             assert row[5] == "900"
