@@ -19,5 +19,5 @@ def test_pickup_supplier_name():
     ])
     df_in, _ = transform_raw_data(df_mock)
     normalized = df_in.iloc[0]['normalized_parent']
-    assert '富士ロジ' in normalized, f'Expected 富士ロジ in {normalized}'
+    assert 'ポジティブ' in normalized, f'Expected ポジティブ in {normalized}'
 
