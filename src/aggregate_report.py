@@ -404,6 +404,11 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
     for ym, col_idx in ym_to_col.items():
         top_header[col_idx] = str(ym)
     top_header[19] = '前年同月差分'
+    top_header[1] = '管理会社'
+    top_header[2] = '客先名称'
+    top_header[3] = '運送業者'
+    top_header[4] = '品名'
+    top_header[5] = '区分'
     grid.append(top_header)
     for cat_info in MASTER_HIERARCHY:
         cat_id = cat_info['cat_id']
