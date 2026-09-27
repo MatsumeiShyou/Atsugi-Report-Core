@@ -511,7 +511,15 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         ship_row_data: List[Any] = [None] * 20
                         ship_row_data[0] = ''
                         keys_tuple = keys if isinstance(keys, tuple) else (keys,)
-                        ship_row_data[1] = f'{keys_tuple[0]} {keys_tuple[1]}'.strip() if len(keys_tuple) >= 2 else str(keys_tuple[0])
+                        if len(group_keys) >= 4:
+                            ship_row_data[1] = str(keys_tuple[0]).strip()
+                            ship_row_data[2] = str(keys_tuple[1]).strip()
+                            ship_row_data[3] = str(keys_tuple[2]).strip()
+                            ship_row_data[4] = str(keys_tuple[3]).strip()
+                            if len(group_keys) >= 5:
+                                ship_row_data[5] = str(keys_tuple[4]).strip()
+                        else:
+                            ship_row_data[1] = str(keys_tuple[0]).strip()
                         ym_sums = supp_df.groupby('_ym')['実重量'].sum()
                         val_last_year = 0.0
                         val_this_month = 0.0

@@ -158,11 +158,6 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1, warni
         grid.insert(0, [])
         for line in reversed(warning_lines):
             grid.insert(0, [line])
-    if warning_text:
-        warning_lines = warning_text.split('\n')
-        grid.insert(0, [])
-        for line in reversed(warning_lines):
-            grid.insert(0, [line])
     for r_idx, row in enumerate(grid):
         for c_idx, val in enumerate(row):
             if pd.notna(val) and val is not None:
