@@ -264,7 +264,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     
     df_inbound["normalized_parent"] = df_inbound.apply(
         lambda r: map_supplier(
-            r["payee_name"] if r["payee_name"] else r["store_name"],
+            r["store_name"] if r["store_name"] else r["payee_name"],
             bool(r.get("横持フラグ", False)),
             str(r.get("大品目分類", ""))
         ),
