@@ -399,16 +399,16 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 target_year, target_month = (int(mode_date.iloc[0].year), int(mode_date.iloc[0].month))
     target_period = pd.Period(f'{target_year:04d}-{target_month:02d}', freq='M')
     unique_yms = [target_period - 12 + i for i in range(13)]
-    ym_to_col = {ym: i + 2 for i, ym in enumerate(unique_yms)}
-    top_header: List[Any] = [None] * 16
+    ym_to_col = {ym: i + 6 for i, ym in enumerate(unique_yms)}
+    top_header: List[Any] = [None] * 20
     for ym, col_idx in ym_to_col.items():
         top_header[col_idx] = str(ym)
-    top_header[15] = '前年同月差分'
+    top_header[19] = '前年同月差分'
     grid.append(top_header)
     for cat_info in MASTER_HIERARCHY:
         cat_id = cat_info['cat_id']
         cat_disp = cat_info.get('cat_disp', cat_id)
-        grid.append([cat_id] + [None] * 15)
+        grid.append([cat_id] + [None] * 19)
         cat_totals = [0.0] * 14
         for route_info in cat_info['routes']:
             route_id = route_info['route_id']
@@ -419,16 +419,16 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 route_df = df_in[(df_in['大品目分類'] == cat_id) & df_in['経路分類'].isin(route_match_list) & (df_in['横持フラグ'] == False)].copy()
             if route_df.empty:
                 continue
-            grid.append([route_id, ''] + [None] * 14)
+            grid.append([route_id, ''] + [None] * 18)
             route_totals = [0.0] * 14
             if not route_df.empty:
                 if cat_id == '＜参考＞事業所間横持ち':
                     group_keys = ['仕入先名', '品名']
                 else:
-                    group_keys = ['normalized_parent', '仕入先名'] if 'normalized_parent' in route_df.columns else ['仕入先名']
+                    group_keys = ['normalized_parent', '仕入先名', '運送店名', '品名', '経路分類'] if 'normalized_parent' in route_df.columns else ['仕入先名', '運送店名', '品名', '経路分類']
                 grouped = route_df.groupby(group_keys)
                 for keys, supp_df in sorted(grouped):
-                    row_data: List[Any] = [None] * 16
+                    row_data: List[Any] = [None] * 20
                     row_data[0] = ''
                     keys_tuple: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
                     if cat_id == '＜参考＞事業所間横持ち':
@@ -448,36 +448,36 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         if ym in ym_to_col:
                             c_idx = ym_to_col[ym]
                             row_data[c_idx] = format_num(float(weight))
-                            route_totals[c_idx - 2] += float(weight)
+                            route_totals[c_idx - 6] += float(weight)
                             if ym == unique_yms[0]:
                                 val_last_year = float(weight)
                             elif ym == unique_yms[12]:
                                 val_this_month = float(weight)
                     diff = val_this_month - val_last_year
-                    row_data[15] = format_num(diff)
+                    row_data[19] = format_num(diff)
                     route_totals[13] += diff
                     grid.append(row_data)
-            subtotal: List[Any] = [None] * 16
+            subtotal: List[Any] = [None] * 20
             subtotal[0] = ''
             subtotal[0] = f"{route_id.split('.')[-1]}合計" if '.' in route_id else f'{route_id}合計'
             subtotal[1] = ''
             for i in range(13):
                 if route_totals[i] > 0 or route_totals[i] < 0:
-                    subtotal[i + 2] = format_num(route_totals[i])
-            subtotal[15] = format_num(route_totals[13])
+                    subtotal[i + 6] = format_num(route_totals[i])
+            subtotal[19] = format_num(route_totals[13])
             grid.append(subtotal)
             for i in range(14):
                 cat_totals[i] += route_totals[i]
-        cat_subtotal: List[Any] = [None] * 16
+        cat_subtotal: List[Any] = [None] * 20
         cat_subtotal[0] = ''
         cat_subtotal[0] = f'{cat_disp}合計'
         cat_subtotal[1] = ''
         for i in range(13):
             if cat_totals[i] != 0:
-                cat_subtotal[i + 2] = format_num(cat_totals[i])
-        cat_subtotal[15] = format_num(cat_totals[13])
+                cat_subtotal[i + 6] = format_num(cat_totals[i])
+        cat_subtotal[19] = format_num(cat_totals[13])
         grid.append(cat_subtotal)
-        grid.append([None] * 16)
+        grid.append([None] * 20)
     if df_outbound is not None and (not df_outbound.empty):
         df_out = df_outbound.copy()
         if 'transaction_date' in df_out.columns:
@@ -486,24 +486,24 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
         else:
             df_out['_date'] = pd.NaT
             df_out['_ym'] = pd.NaT
-        grid.append(['＜出荷＞'] + [None] * 15)
+        grid.append(['＜出荷＞'] + [None] * 19)
         for cat_info in SHIPPING_HIERARCHY:
             cat_id = cat_info['cat_id']
             cat_disp = cat_info['cat_disp']
-            grid.append([cat_id, ''] + [None] * 14)
+            grid.append([cat_id, ''] + [None] * 18)
             cat_shipping_totals = [0.0] * 14
             for route_info in cat_info['routes']:
                 route_id = route_info['route_id']
                 route_match_list = route_info['route_match']
                 route_disp = route_info['route_disp']
                 route_df = df_out[(df_out['大品目分類'] == cat_id) & df_out['経路分類'].isin(route_match_list)].copy()
-                grid.append([route_id, ''] + [None] * 14)
+                grid.append([route_id, ''] + [None] * 18)
                 route_totals = [0.0] * 14
                 if not route_df.empty:
-                    group_keys = ['client_name', 'spec_name'] if 'client_name' in route_df.columns else ['得意先名', '品名']
+                    group_keys = ['client_name', '得意先名', '運送店名(売上)', '品名', '取引区分名称(売上)'] if 'client_name' in route_df.columns else ['得意先名', '運送店名(売上)', '品名', '取引区分名称(売上)']
                     grouped = route_df.groupby(group_keys)
                     for keys, supp_df in sorted(grouped):
-                        ship_row_data: List[Any] = [None] * 16
+                        ship_row_data: List[Any] = [None] * 20
                         ship_row_data[0] = ''
                         keys_tuple = keys if isinstance(keys, tuple) else (keys,)
                         ship_row_data[1] = f'{keys_tuple[0]} {keys_tuple[1]}'.strip() if len(keys_tuple) >= 2 else str(keys_tuple[0])
@@ -515,33 +515,33 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                             if ym in ym_to_col:
                                 c_idx = ym_to_col[ym]
                                 ship_row_data[c_idx] = format_num(float(weight))
-                                route_totals[c_idx - 2] += float(weight)
+                                route_totals[c_idx - 6] += float(weight)
                                 if ym == unique_yms[0]:
                                     val_last_year = float(weight)
                                 elif ym == unique_yms[12]:
                                     val_this_month = float(weight)
-                        ship_row_data[15] = format_num(val_this_month - val_last_year)
+                        ship_row_data[19] = format_num(val_this_month - val_last_year)
                         route_totals[13] += val_this_month - val_last_year
                         grid.append(ship_row_data)
-                ship_subtotal: List[Any] = [None] * 16
+                ship_subtotal: List[Any] = [None] * 20
                 ship_subtotal[0] = f'{route_disp}合計'
                 ship_subtotal[1] = ''
                 for i in range(13):
                     if route_totals[i] != 0:
-                        ship_subtotal[i + 2] = format_num(route_totals[i])
-                ship_subtotal[15] = format_num(route_totals[13])
+                        ship_subtotal[i + 6] = format_num(route_totals[i])
+                ship_subtotal[19] = format_num(route_totals[13])
                 grid.append(ship_subtotal)
                 for i in range(14):
                     cat_shipping_totals[i] += route_totals[i]
-            cat_subtotal: List[Any] = [None] * 16
+            cat_subtotal: List[Any] = [None] * 20
             cat_subtotal[0] = f'{cat_disp}出荷合計'
             cat_subtotal[1] = ''
             for i in range(13):
                 if cat_shipping_totals[i] != 0:
-                    cat_subtotal[i + 2] = format_num(cat_shipping_totals[i])
-            cat_subtotal[15] = format_num(cat_shipping_totals[13])
+                    cat_subtotal[i + 6] = format_num(cat_shipping_totals[i])
+            cat_subtotal[19] = format_num(cat_shipping_totals[13])
             grid.append(cat_subtotal)
-            grid.append([None] * 16)
+            grid.append([None] * 20)
     return grid
 
 
