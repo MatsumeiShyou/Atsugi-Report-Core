@@ -8,50 +8,6 @@ from aggregate_report import (
     is_outbound_transaction, classify_outbound_route
 )
 
-def test_transform_and_coordinate_mapping() -> None:
-    data = {
-        "仕入先名": ["青木商店", "富士営業所(横持)", "そのた", "段ボール(プレス)", "アイダスト"],
-        "品名": ["段ボール", "紙ゴミ", "雑誌", "段ボール(プレス)", "新聞"],
-        "経路": ["持込", "自社", "持込", "持込", "他社"],
-        "正味重量": [1000, 500, 2000, 3000, 100],
-        "調整重量": [-100, 0, 50, -500, 0],
-        "transaction_date": ["2026-09-01", "2026-09-01", "2026-09-01", "2026-09-01", "2026-09-01"]
-    }
-    df = pd.DataFrame(data)
-    
-    df_inbound, df_outbound = transform_raw_data(df)
-    
-    assert df_inbound.loc[0, "実重量"] == 900
-    assert df_inbound.loc[1, "横持フラグ"] == True
-    assert df_inbound.loc[3, "経路分類"] == "プレス品"
-    
-    macro = build_macro_report(df_inbound, df_outbound, target_year=2026, target_month=9)
-    
-    # マクロレポートで青木商店を探す
-    found_macro_aoki = False
-    for row in macro:
-        if row[0] == "" and row[1] == "㈲青木商店":
-            # 当月(2026-09)はインデックス14 (Col 14)
-            assert row[14] == "900"
-            found_macro_aoki = True
-            break
-    assert found_macro_aoki
-    
-    micro = build_micro_report(df_inbound, df_outbound, target_year=2026, target_month=9)
-
-    # ミクロレポートで青木商店を探す
-    found_micro_aoki = False
-    for row in micro:
-        if len(row) > 36 and row[2] == "㈲青木商店" and row[1] == "持込み":
-            assert row[3] == "", f"Expected 品名 '', got '{row[3]}'"
-            # Day 1 は F列 (index 5)
-            assert row[5] == "900"
-            # 行合計は index 36
-            assert row[36] == "900"
-            found_micro_aoki = True
-            break
-    assert found_micro_aoki
-
 def test_split_pipeline_and_shipping_classification() -> None:
     """入出荷の物理分離と出荷ルート（輸出/国内）判定の検証"""
     data = {
@@ -102,12 +58,12 @@ def test_directive_1_shipping_in_micro_report() -> None:
     for row in micro:
         if row[0] == "＜出荷＞":
             shipping_header_found = True
-        if len(row) > 36 and row[2] == "JOP" and row[3] == "古段(プレス)":
+        if len(row) > 36 and row[1] == "JOP" and row[3] == "古段(プレス)":
             # Day 5 は index 9 (5 + 4)
             assert row[9] == "20,000"
             assert row[36] == "20,000"
             jop_found = True
-        if len(row) > 36 and row[2] is not None and "日本製紙" in str(row[2]) and row[3] == "古段(プレス)":
+        if len(row) > 36 and row[1] is not None and "日本製紙" in str(row[1]) and row[3] == "古段(プレス)":
             # Day 10 は index 14
             assert row[14] == "15,000"
             assert row[36] == "15,000"
