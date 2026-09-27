@@ -266,11 +266,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_inbound["payee_name"] = df_inbound["支払先名"].fillna("").astype(str).str.strip()
     
     df_inbound["normalized_parent"] = df_inbound.apply(
-        lambda r: map_supplier(
-            r["store_name"] if r["store_name"] else r["payee_name"],
-            bool(r.get("横持フラグ", False)),
-            str(r.get("大品目分類", ""))
-        ),
+        lambda r: str(r.get("支払先名", "")).strip() if str(r.get("支払先名", "")).strip() != "" else str(r.get("仕入先名", "")).strip(),
         axis=1
     )
     
