@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from google_api import fetch_csv_from_drive, write_to_sheets
 from supabase_client import load_to_db, extract_from_db
 from aggregate_report import transform_raw_data, build_macro_report, build_micro_report, generate_warnings, purge_zero_sum_groups
-from excel_presenter import ExcelReportPresenter
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -114,33 +113,6 @@ def main() -> None:
         # [L] Directive 4: Generate Audit-Grade Excel Ledger
         from supabase_client import download_template_from_storage
         bucket_name = os.environ.get("SUPABASE_TEMPLATE_BUCKET", "report-templates")
-        template_file_name = os.environ.get("TEMPLATE_FILE_NAME", "atsugi_template.xlsx")
-        template_path = os.environ.get("EXCEL_TEMPLATE_PATH")
-        if not template_path:
-            template_path = download_template_from_storage(bucket_name, template_file_name)
-        output_excel_dir = os.environ.get(
-            "EXCEL_OUTPUT_DIR",
-            os.path.join(os.path.dirname(__file__), "..", "output")
-        )
-        output_excel_path = os.path.join(
-            output_excel_dir,
-            f"厚木事業所_入荷日報_{target_year}_{target_month:02d}.xlsx"
-        )
-        
-        logger.info(f"監査証跡・雛形数式保持型 Excel 日報を出力します: {output_excel_path}")
-        try:
-            presenter = ExcelReportPresenter(template_path)
-            presenter.render_monthly_report(
-                df_inbound=df_micro_in,
-                df_outbound=df_micro_out,
-                target_year=target_year,
-                target_month=target_month,
-                output_path=output_excel_path
-            )
-            logger.info(f"監査日報 Excel の生成が完了しました: {output_excel_path}")
-        except Exception as e:
-            logger.error(f"ExcelReportPresenter の実行中にエラーが発生しました: {e}", exc_info=True)
-            raise e
 
         logger.info("ETL パイプラインが完了しました。")
 

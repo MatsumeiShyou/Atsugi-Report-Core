@@ -5,7 +5,7 @@ import unicodedata
 import datetime
 
 # --- 主要取引先リスト ---
-from mapping_definitions import MAJOR_CLIENTS_LIST
+from mapping_definitions import MAJOR_CLIENTS_LIST, ITEM_CATEGORY_MAP
 MAJOR_CLIENTS = set(MAJOR_CLIENTS_LIST)
 # ---------------------------------------------------
 
@@ -15,47 +15,7 @@ YOKOMOCHI_KEYWORDS = ["(横持)"]
 
 
 
-# 新しいマッピングの追加
-ITEM_TO_CATEGORY = {
-    "段ボール": "①段ボール", "E段": "①段ボール",
-    "新聞": "②新聞",
-    "雑誌": "③雑誌", "雑古紙": "③雑誌", "雑がみ": "③雑誌", "ミックス紙": "③雑誌",
-    "PETボトル": "④プラ類", "ペットボトル": "④プラ類", "ストレッチフィルム": "④プラ類", "シュリンクフィルム": "④プラ類", 
-    "PPバンド": "④プラ類", "廃プラ軟質": "④プラ類", "プラスチックパレット": "④プラ類", "フイルム": "④プラ類", "フィルム": "④プラ類",
-    "牛乳パック": "⑤その他", "ウエス": "⑤その他", "台紙": "⑤その他", "上台紙": "⑤その他",
-    "模造": "⑤その他", "クラフト": "⑤その他", "色クラフト": "⑤その他", "窓付廃紙": "⑤その他",
-    "プレス加工賃": "⑤その他", "運搬": "⑤その他", "カゴ運搬": "⑤その他", "運搬料": "⑤その他", 
-    "上白": "⑤その他", "紙パック": "⑤その他", "紙管": "⑤その他", "シュレッダー": "⑤その他",
-    "ケント": "⑤その他", "上ケント": "⑤その他", "損紙": "⑤その他", "白・色混り": "⑤その他",
-    "ワンプ": "⑤その他", "カップ原紙": "⑤その他", "マルチパック": "⑤その他", "その他": "⑤その他",
-    "糊付廃紙": "⑤その他",
-    "雑袋": "⑤その他",
-    "布類": "⑤その他",
-    "ライナー巻取": "⑤その他",
-    "色上": "⑤その他",
-    "アルミ缶": "⑤その他",
-    "機密書類": "⑤その他",
-    "色上 ハーゼスト": "⑤その他",
-    "袋茶プレス": "⑤その他",
-    "荷潰し品": "⑤その他",
-    "雑袋プレス": "⑤その他",
-    "機密書類 相模野病院": "⑤その他",
-    "パルプ": "⑤その他",
-    "鉄くず": "⑤その他",
-    "機密書類 アサヒロジスティクス": "⑤その他",
-    "難処理古紙プレス": "⑤その他",
-    "トレーシングペーパー": "⑤その他",
-    "切茶": "⑤その他",
-    "セロハン巻取": "⑤その他",
-    "セロハン巻取(三和機工)": "⑤その他",
-    "巻取": "⑤その他",
-    "巻取@38": "⑤その他",
-    "機密書類 木下カンセー": "⑤その他",
-    "軟質ミックス 仁和包装": "⑤その他",
-    "機密書類 コーナン鎌倉大船モー": "⑤その他",
-    "軟質ミックス": "⑤その他",
-    "軟質ミックスプレス": "⑤その他"
-}
+
 
 def is_outbound_transaction(row: pd.Series) -> bool:
     """
@@ -235,7 +195,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
             return "＜参考＞事業所間横持ち"
 
         item_str = str(row.get("品名", ""))
-        for k, v in ITEM_TO_CATEGORY.items():
+        for k, v in ITEM_CATEGORY_MAP.items():
             if k in item_str:
                 return v
                 
@@ -244,7 +204,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         if is_adjustment:
             note_str = str(row.get("備考", ""))
-            for k, v in ITEM_TO_CATEGORY.items():
+            for k, v in ITEM_CATEGORY_MAP.items():
                 if k in note_str:
                     return v
                     
@@ -589,275 +549,139 @@ def build_macro_report(
             
     return grid
 
+
+import pandas as pd
+from typing import List, Any, Optional
+
+def _filter_month(df: pd.DataFrame, year: int, month: int) -> pd.DataFrame:
+    df = df.copy()
+    if "transaction_date" in df.columns:
+        df["_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
+        df["_year"] = df["_date"].dt.year
+        df["_month"] = df["_date"].dt.month
+        df["_day"] = df["_date"].dt.day
+        return df[(df["_year"] == year) & (df["_month"] == month)].copy()
+    return pd.DataFrame()
+
 def build_micro_report(
     df_inbound: pd.DataFrame,
     df_outbound: Optional[pd.DataFrame] = None,
     target_year: Optional[int] = None,
     target_month: Optional[int] = None
 ) -> List[List[Any]]:
-    grid: List[List[Any]] = []
     
-    df_in = df_inbound.copy()
-    if "transaction_date" in df_in.columns:
-        df_in["_date"] = pd.to_datetime(df_in["transaction_date"], errors="coerce")
-        df_in["_day"] = df_in["_date"].dt.day
-        df_in["_year"] = df_in["_date"].dt.year
-        df_in["_month"] = df_in["_date"].dt.month
-    else:
-        df_in["_date"] = pd.NaT
-        df_in["_day"] = pd.NaT
-        df_in["_year"] = pd.NaT
-        df_in["_month"] = pd.NaT
+    if target_year is None or target_month is None:
+        target_year, target_month = 2026, 8
         
-    year, month = target_year, target_month
-    
-    if year is None or month is None:
-        year, month = 2026, 8
-        valid_dates = df_in["_date"].dropna()
-        if not valid_dates.empty:
-            mode_date = valid_dates.dt.to_period("M").mode()
-            if not mode_date.empty:
-                year, month = int(mode_date.iloc[0].year), int(mode_date.iloc[0].month)
-                
-    if not df_in.empty and "_year" in df_in.columns:
-        df_in = df_in[(df_in["_year"] == year) & (df_in["_month"] == month)].copy()
-            
-    row0: List[Any] = [None] * 41
-    row0[3] = f"{month}月"
-    grid.append(row0)
-    
-    row1: List[Any] = [None] * 41
-    row1[0] = "管理会社"
-    row1[1] = "客先名称"
-    row1[2] = "運搬業者"
-    row1[3] = "品名"
-    row1[4] = ""
-    
-    weekdays = ["月", "火", "水", "木", "金", "土", "日"]
-    for d in range(1, 32):
-        try:
-            dt = datetime.date(year, month, d)
-            wd = weekdays[dt.weekday()]
-            day_str = f"{d}({wd})"
-        except ValueError:
-            day_str = f"{d}()"
-        row1[4 + d] = day_str
-    row1[36] = "合計"
-    
-    row1[38] = "カテゴリ・業者名"
-    row1[39] = "品名等"
-    row1[40] = "当月合計"
-    grid.append(row1)
-    
-    right_side_data: List[List[Any]] = []
-    total_all = 0.0
-    nyuka_total = 0.0
-    
-    for cat_info in MASTER_HIERARCHY:
-        cat_id = cat_info["cat_id"]
-        cat_disp = cat_info["cat_disp"]
-        
-        right_side_data.append([cat_id, "", ""])
-        cat_total = 0.0
-        
-        for route_info in cat_info["routes"]:
-            route_id = route_info["route_id"]
-            route_match_list = route_info["route_match"]
-            route_disp = route_info["route_disp"]
-            
-            if cat_id == "＜参考＞事業所間横持ち":
-                route_df = df_in[df_in["横持フラグ"] == True].copy()
-            else:
-                route_df = df_in[(df_in["大品目分類"] == cat_id) & (df_in["経路分類"].isin(route_match_list)) & (df_in["横持フラグ"] == False)].copy()
-            if route_df.empty:
-                continue
+    df_in = _filter_month(df_inbound, target_year, target_month)
+    df_out = _filter_month(df_outbound, target_year, target_month) if df_outbound is not None else pd.DataFrame()
 
-                
-            h_row: List[Any] = [None] * 41
-            h_row[0] = f"{cat_disp}-{route_disp}"
-            grid.append(h_row)
-            
-            right_side_idx = len(right_side_data)
-            right_side_data.append(["", route_id, ""])
-            
-            route_totals = [0.0] * 32
-            
-            if not route_df.empty:
-                if cat_id == "＜参考＞事業所間横持ち":
-                    group_keys = ["仕入先名", "品名"]
-                else:
-                    group_keys = ["支払先名", "仕入先名", "運送店名", "品名"]
+    left_rows: List[List[Any]] = []
+    right_rows: List[List[Any]] = []
+    
+    # ------------------
+    # ヘッダー (左側)
+    # ------------------
+    h_left = ["管理会社", "客先名称", "運搬業者", "品名", ""] + [f"{d}日" for d in range(1, 32)] + ["合計"]
+    left_rows.append(h_left)
+    
+    # ヘッダー (右側)
+    h_right = ["サマリー:大分類", "経路", "合計重量(kg)"]
+    right_rows.append(h_right)
+    
+    def format_num(val):
+        if val == 0: return ""
+        if pd.isna(val): return ""
+        return f"{int(val):,}"
 
-                grouped = route_df.groupby(group_keys)
-                
-                for keys, supp_df in sorted(grouped):
-                    r_data: List[Any] = [None] * 41
-                    keys_tuple: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
-                    
-                    if cat_id == "＜参考＞事業所間横持ち":
-                        origin = str(keys_tuple[0]).replace("(横持)", "").replace("事業所", "").strip()
-                        r_data[1] = f"{origin}→厚木"
-                        r_data[3] = keys_tuple[1] if len(keys_tuple) >= 2 else ""
-                    else:
-                        if len(keys_tuple) >= 4:
-                            r_data[0] = keys_tuple[0] 
-                            r_data[1] = keys_tuple[1] 
-                            r_data[2] = keys_tuple[2] 
-                            r_data[3] = "" if cat_id != "⑤その他" else keys_tuple[3]
-                        else:
-                            r_data[0] = str(keys_tuple[0])
-                            r_data[3] = str(keys_tuple[1]) if len(keys_tuple) > 1 else ""
-                    
-                    r_data[4] = "持込" if "持込" in route_disp else "引取"
-                    
-                    row_total = 0.0
-                    day_sums = supp_df.groupby("_day")["実重量"].sum()
-                    for day_key, weight in day_sums.items():
-                        if pd.notna(cast(Any, day_key)) and 1 <= int(str(day_key)) <= 31:
-                            r_data[4 + int(str(day_key))] = format_num(float(weight))
-                            row_total += float(weight)
-                            route_totals[int(str(day_key))] += float(weight)
-                            
-                    r_data[36] = format_num(row_total)
-                    route_totals[0] += row_total
-                    grid.append(r_data)
-                    
-                    disp_supplier = keys_tuple[1] if (len(keys_tuple) >= 2 and keys_tuple[1]) else str(keys_tuple[0])
-                    disp_item = str(keys_tuple[3]) if len(keys_tuple) >= 4 else (str(keys_tuple[1]) if len(keys_tuple) >= 2 and cat_id == "＜参考＞事業所間横持ち" else "")
-                    right_side_data.append([disp_supplier, disp_item, format_num(row_total)])
-                    
-            subtotal: List[Any] = [None] * 41
-            subtotal_label = f"{route_id.split('.')[-1]}合計" if "." in route_id else f"{route_id}合計"
-            subtotal[4] = subtotal_label
+    # ------------------
+    # 入荷データ
+    # ------------------
+    if not df_in.empty:
+        df_in["表示用業者名"] = df_in.apply(
+            lambda r: r["normalized_parent"] if r.get("is_major_client", True) else "その他（未分類）", 
+            axis=1
+        )
+        df_in["表示用品名"] = df_in.apply(
+            lambda r: r.get("品名", "") if r.get("大品目分類", "") == "⑤その他" else "",
+            axis=1
+        )
+        
+        # 左側 (明細)
+        pivot_in_daily = pd.pivot_table(
+            df_in, values="実重量", index=["大品目分類", "経路分類", "表示用業者名", "表示用品名"],
+            columns=["_day"], aggfunc="sum", fill_value=0
+        )
+        pivot_in_daily["合計"] = pivot_in_daily.sum(axis=1)
+        
+        for idx, row in pivot_in_daily.iterrows():
+            idx_tuple = tuple(idx) if isinstance(idx, (list, tuple)) else (idx,)
+            row_data = [str(x) for x in idx_tuple] + [""]
             for d in range(1, 32):
-                if route_totals[d] > 0 or route_totals[d] < 0:
-                    subtotal[4 + d] = format_num(route_totals[d])
-            subtotal[36] = format_num(route_totals[0])
-            grid.append(subtotal)
+                row_data.append(format_num(row.get(d, 0)))
+            row_data.append(format_num(row["合計"]))
+            left_rows.append(row_data)
             
-            cat_total += route_totals[0]
-            right_side_data[right_side_idx][2] = format_num(route_totals[0])
-            
-        cat_total_row: List[Any] = [None] * 41
-        cat_total_row[4] = f"{cat_disp}合計"
-        cat_total_row[36] = format_num(cat_total)
-        grid.append(cat_total_row)
+        # 右側 (サマリー)
+        pivot_in_summary = pd.pivot_table(
+            df_in, values="実重量", index=["大品目分類", "経路分類"], aggfunc="sum", fill_value=0
+        ).rename(columns={"実重量": "合計"})
         
-        grid.append([None] * 41)
+        for idx, row in pivot_in_summary.iterrows():
+            idx_tuple = tuple(idx) if isinstance(idx, (list, tuple)) else (idx, "")
+            right_rows.append([str(idx_tuple[0]), str(idx_tuple[1] if len(idx_tuple) > 1 else ""), format_num(row["合計"])])
         
-        total_all += cat_total
-        if cat_id != "＜参考＞事業所間横持ち":
-            nyuka_total += cat_total
-            
-        if cat_id == "⑤その他":
-            nyuka_total_row: List[Any] = [None] * 41
-            nyuka_total_row[4] = "入荷合計(横持除く)"
-            nyuka_total_row[36] = format_num(nyuka_total)
-            grid.append(nyuka_total_row)
-            grid.append([None] * 41)
-        
-    grand_total: List[Any] = [None] * 41
-    grand_total[4] = "入荷総合計"
-    grand_total[36] = format_num(total_all)
-    grid.append(grand_total)
-    grid.append([None] * 41)
-    
-    # --- Directive 1: 出荷セクションの完全実装 (df_outbound) ---
-    grid.append(["＜出荷＞"] + [None]*40)
-    
-    shipping_total_all = 0.0
-    if df_outbound is not None and not df_outbound.empty:
-        df_out = df_outbound.copy()
-        if "transaction_date" in df_out.columns:
-            df_out["_date"] = pd.to_datetime(df_out["transaction_date"], errors="coerce")
-            df_out["_day"] = df_out["_date"].dt.day
-            df_out["_year"] = df_out["_date"].dt.year
-            df_out["_month"] = df_out["_date"].dt.month
-            df_out = df_out[(df_out["_year"] == year) & (df_out["_month"] == month)].copy()
-        else:
-            df_out = df_out.iloc[0:0].copy()
+        right_rows.append(["", "入荷総合計", format_num(pivot_in_summary["合計"].sum())])
+        right_rows.append(["", "", ""])
 
-        for cat_info in SHIPPING_HIERARCHY:
-            cat_id = cat_info["cat_id"]
-            cat_disp = cat_info["cat_disp"]
-            cat_total = 0.0
+    # ------------------
+    # 出荷データ
+    # ------------------
+    left_rows.append(["＜出荷＞"] + [""] * 36)
+    right_rows.append(["＜出荷＞", "", ""])
+    
+    if not df_out.empty:
+        pivot_out_daily = pd.pivot_table(
+            df_out, values="実重量", index=["大品目分類", "経路分類", "client_name", "spec_name"],
+            columns=["_day"], aggfunc="sum", fill_value=0
+        )
+        pivot_out_daily["合計"] = pivot_out_daily.sum(axis=1)
+        
+        for idx, row in pivot_out_daily.iterrows():
+            idx_tuple = tuple(idx) if isinstance(idx, (list, tuple)) else (idx,)
+            row_data = [str(x) for x in idx_tuple] + [""]
+            for d in range(1, 32):
+                row_data.append(format_num(row.get(d, 0)))
+            row_data.append(format_num(row["合計"]))
+            left_rows.append(row_data)
             
-            has_cat_header = False
+        pivot_out_summary = pd.pivot_table(
+            df_out, values="実重量", index=["大品目分類", "経路分類"], aggfunc="sum", fill_value=0
+        ).rename(columns={"実重量": "合計"})
+        
+        for idx, row in pivot_out_summary.iterrows():
+            idx_tuple = tuple(idx) if isinstance(idx, (list, tuple)) else (idx, "")
+            right_rows.append([str(idx_tuple[0]), str(idx_tuple[1] if len(idx_tuple) > 1 else ""), format_num(row["合計"])])
             
-            for route_info in cat_info["routes"]:
-                route_id = route_info["route_id"]
-                route_match_list = route_info["route_match"]
-                
-                route_df = df_out[(df_out["大品目分類"] == cat_id) & (df_out["経路分類"].isin(route_match_list))].copy()
-                if route_df.empty:
-                    continue
-                    
-                if not has_cat_header:
-                    grid.append(["", cat_id] + [None]*39)
-                    has_cat_header = True
-                    
-                grid.append(["", route_id] + [None]*39)
-                
-                route_totals = [0.0] * 32
-                
-                group_keys = ["client_name", "spec_name"] if "client_name" in route_df.columns else ["得意先名", "品名"]
-                grouped = route_df.groupby(group_keys)
-                
-                for keys, supp_df in sorted(grouped):
-                    r_data_ship: List[Any] = [None] * 41
-                    keys_tuple_ship: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
-                    
-                    if len(keys_tuple_ship) >= 2:
-                        r_data_ship[1] = keys_tuple_ship[0] 
-                        r_data_ship[3] = keys_tuple_ship[1] 
-                    else:
-                        r_data_ship[1] = str(keys_tuple_ship[0])
-                    
-                    row_total = 0.0
-                    day_sums = supp_df.groupby("_day")["実重量"].sum()
-                    for day_key, weight in day_sums.items():
-                        if pd.notna(cast(Any, day_key)) and 1 <= int(str(day_key)) <= 31:
-                            r_data_ship[4 + int(str(day_key))] = format_num(float(weight))
-                            row_total += float(weight)
-                            route_totals[int(str(day_key))] += float(weight)
-                            
-                    r_data_ship[36] = format_num(row_total)
-                    route_totals[0] += row_total
-                    grid.append(r_data_ship)
-                    
-                subtotal_ship: List[Any] = [None] * 41
-                subtotal_ship[1] = f"{route_id.split('.')[-1]}合計"
-                for d in range(1, 32):
-                    if route_totals[d] > 0 or route_totals[d] < 0:
-                        subtotal_ship[4 + d] = format_num(route_totals[d])
-                subtotal_ship[36] = format_num(route_totals[0])
-                grid.append(subtotal_ship)
-                grid.append([None] * 41)
-                
-                cat_total += route_totals[0]
-                
-            if cat_total > 0:
-                cat_total_row_ship: List[Any] = [None] * 41
-                cat_total_row_ship[1] = f"{cat_disp}出荷合計"
-                cat_total_row_ship[36] = format_num(cat_total)
-                grid.append(cat_total_row_ship)
-                grid.append([None] * 41)
-                shipping_total_all += cat_total
-                
-        if shipping_total_all > 0:
-            ship_grand_total: List[Any] = [None] * 41
-            ship_grand_total[1] = "出荷総合計"
-            ship_grand_total[36] = format_num(shipping_total_all)
-            grid.append(ship_grand_total)
+        right_rows.append(["", "出荷総合計", format_num(pivot_out_summary["合計"].sum())])
 
-    for i in range(len(right_side_data)):
-        rs_row = right_side_data[i]
-        rs_padded = rs_row + [""] * max(0, 3 - len(rs_row))
-        if i + 2 < len(grid):
-            grid[i + 2][38] = rs_padded[0]
-            grid[i + 2][39] = rs_padded[1]
-            grid[i + 2][40] = rs_padded[2]
-            
+    # ------------------
+    # 左右の結合 (Zip Longest)
+    # ------------------
+    max_len = max(len(left_rows), len(right_rows))
+    grid = []
+    
+    for i in range(max_len):
+        l_row = left_rows[i] if i < len(left_rows) else [""] * 37
+        r_row = right_rows[i] if i < len(right_rows) else ["", "", ""]
+        
+        # l_row は通常37列 (4つのインデックス + 31日 + 合計)
+        # 不足分は空文字でパディング
+        l_padded = l_row + [""] * max(0, 37 - len(l_row))
+        # 37列目に空のスペーサー列を入れて、38〜40列目に右側データを配置
+        grid_row = l_padded[:37] + [""] + r_row
+        grid.append(grid_row)
+        
     return grid
 
 def generate_warnings(df: pd.DataFrame) -> str:
@@ -866,13 +690,13 @@ def generate_warnings(df: pd.DataFrame) -> str:
         if row.get("大品目分類") == "⑤その他":
             item_str = str(row.get("品名", ""))
             is_mapped = False
-            for k, v in ITEM_TO_CATEGORY.items():
+            for k, v in ITEM_CATEGORY_MAP.items():
                 if k in item_str and v == "⑤その他":
                     is_mapped = True
                     break
             if not is_mapped:
                 note_str = str(row.get("備考", ""))
-                for k, v in ITEM_TO_CATEGORY.items():
+                for k, v in ITEM_CATEGORY_MAP.items():
                     if k in note_str and v == "⑤その他":
                         is_mapped = True
                         break

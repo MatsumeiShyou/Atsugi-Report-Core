@@ -38,15 +38,15 @@ def test_transform_and_coordinate_mapping() -> None:
     assert found_macro_aoki
     
     micro = build_micro_report(df_inbound, df_outbound, target_year=2026, target_month=9)
-    
-    # ミクロレポートで青木商店を探す（Directive 1撤去: 品名が空欄になること）
+
+    # ミクロレポートで青木商店を探す
     found_micro_aoki = False
     for row in micro:
-        if len(row) > 36 and row[1] == "青木商店" and row[4] == "持込":
+        if len(row) > 36 and row[2] == "青木商店" and row[1] == "持込み":
             assert row[3] == "", f"Expected 品名 '', got '{row[3]}'"
             # Day 1 は F列 (index 5)
             assert row[5] == "900"
-            # 行合計は AK列 (index 36)
+            # 行合計は index 36
             assert row[36] == "900"
             found_micro_aoki = True
             break
@@ -98,21 +98,21 @@ def test_directive_1_shipping_in_micro_report() -> None:
     shipping_header_found = False
     jop_found = False
     np_found = False
-    
+
     for row in micro:
         if row[0] == "＜出荷＞":
             shipping_header_found = True
-        if row[1] == "JOP" and row[3] == "古段(プレス)":
-            # Day 5 は index 9 (4 + 5)
+        if len(row) > 36 and row[2] == "JOP" and row[3] == "古段(プレス)":
+            # Day 5 は index 9 (5 + 4)
             assert row[9] == "20,000"
             assert row[36] == "20,000"
             jop_found = True
-        if row[1] is not None and "日本製紙" in str(row[1]) and row[3] == "古段(プレス)":
-            # Day 10 は index 14 (4 + 10)
+        if len(row) > 36 and row[2] is not None and "日本製紙" in str(row[2]) and row[3] == "古段(プレス)":
+            # Day 10 は index 14
             assert row[14] == "15,000"
             assert row[36] == "15,000"
             np_found = True
-            
+
     assert shipping_header_found, "＜出荷＞ ヘッダーが見つかりません"
     assert jop_found, "JOP の出荷行が見つかりません"
     assert np_found, "日本製紙の出荷行が見つかりません"
