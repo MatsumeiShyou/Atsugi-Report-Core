@@ -407,7 +407,9 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
     grid.append(top_header)
     for cat_info in MASTER_HIERARCHY:
         cat_id = cat_info['cat_id']
+        cat_disp = cat_info.get('cat_disp', cat_id)
         grid.append([cat_id] + [None] * 15)
+        cat_totals = [0.0] * 14
         for route_info in cat_info['routes']:
             route_id = route_info['route_id']
             route_match_list = route_info['route_match']
@@ -459,6 +461,16 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                     subtotal[i + 2] = format_num(route_totals[i])
             subtotal[15] = format_num(route_totals[13])
             grid.append(subtotal)
+            for i in range(14):
+                cat_totals[i] += route_totals[i]
+        cat_subtotal: List[Any] = [None] * 16
+        cat_subtotal[0] = ''
+        cat_subtotal[1] = f'{cat_disp}合計'
+        for i in range(13):
+            if cat_totals[i] != 0:
+                cat_subtotal[i + 2] = format_num(cat_totals[i])
+        cat_subtotal[15] = format_num(cat_totals[13])
+        grid.append(cat_subtotal)
         grid.append([None] * 16)
     if df_outbound is not None and (not df_outbound.empty):
         df_out = df_outbound.copy()
