@@ -425,7 +425,7 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 if cat_id == '＜参考＞事業所間横持ち':
                     group_keys = ['仕入先名', '品名']
                 else:
-                    group_keys = ['normalized_parent'] if 'normalized_parent' in route_df.columns else ['仕入先名']
+                    group_keys = ['normalized_parent', '仕入先名'] if 'normalized_parent' in route_df.columns else ['仕入先名']
                 grouped = route_df.groupby(group_keys)
                 for keys, supp_df in sorted(grouped):
                     row_data: List[Any] = [None] * 16
@@ -435,7 +435,11 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         origin = str(keys_tuple[0]).replace('(横持)', '').replace('事業所', '').strip()
                         row_data[1] = f'{origin}→厚木'
                     else:
-                        row_data[1] = keys_tuple[0]
+                        if len(group_keys) > 1:
+                            disp_name = str(keys_tuple[1]).strip()
+                            row_data[1] = disp_name if disp_name else str(keys_tuple[0]).strip()
+                        else:
+                            row_data[1] = str(keys_tuple[0]).strip()
                     ym_sums = supp_df.groupby('_ym')['実重量'].sum()
                     val_last_year = 0.0
                     val_this_month = 0.0
