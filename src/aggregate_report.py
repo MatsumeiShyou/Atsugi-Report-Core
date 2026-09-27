@@ -419,7 +419,7 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 route_df = df_in[(df_in['大品目分類'] == cat_id) & df_in['経路分類'].isin(route_match_list) & (df_in['横持フラグ'] == False)].copy()
             if route_df.empty:
                 continue
-            grid.append(['', route_id] + [None] * 14)
+            grid.append([route_id, ''] + [None] * 14)
             route_totals = [0.0] * 14
             if not route_df.empty:
                 if cat_id == '＜参考＞事業所間横持ち':
@@ -455,7 +455,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                     grid.append(row_data)
             subtotal: List[Any] = [None] * 16
             subtotal[0] = ''
-            subtotal[1] = f"{route_id.split('.')[-1]}合計" if '.' in route_id else f'{route_id}合計'
+            subtotal[0] = f"{route_id.split('.')[-1]}合計" if '.' in route_id else f'{route_id}合計'
+            subtotal[1] = ''
             for i in range(13):
                 if route_totals[i] > 0 or route_totals[i] < 0:
                     subtotal[i + 2] = format_num(route_totals[i])
@@ -465,7 +466,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 cat_totals[i] += route_totals[i]
         cat_subtotal: List[Any] = [None] * 16
         cat_subtotal[0] = ''
-        cat_subtotal[1] = f'{cat_disp}合計'
+        cat_subtotal[0] = f'{cat_disp}合計'
+        cat_subtotal[1] = ''
         for i in range(13):
             if cat_totals[i] != 0:
                 cat_subtotal[i + 2] = format_num(cat_totals[i])
@@ -484,14 +486,14 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
         for cat_info in SHIPPING_HIERARCHY:
             cat_id = cat_info['cat_id']
             cat_disp = cat_info['cat_disp']
-            grid.append(['', cat_id] + [None] * 14)
+            grid.append([cat_id, ''] + [None] * 14)
             cat_shipping_totals = [0.0] * 14
             for route_info in cat_info['routes']:
                 route_id = route_info['route_id']
                 route_match_list = route_info['route_match']
                 route_disp = route_info['route_disp']
                 route_df = df_out[(df_out['大品目分類'] == cat_id) & df_out['経路分類'].isin(route_match_list)].copy()
-                grid.append(['', route_id] + [None] * 14)
+                grid.append([route_id, ''] + [None] * 14)
                 route_totals = [0.0] * 14
                 if not route_df.empty:
                     group_keys = ['client_name', 'spec_name'] if 'client_name' in route_df.columns else ['得意先名', '品名']
@@ -518,7 +520,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         route_totals[13] += val_this_month - val_last_year
                         grid.append(ship_row_data)
                 ship_subtotal: List[Any] = [None] * 16
-                ship_subtotal[1] = f'{route_disp}合計'
+                ship_subtotal[0] = f'{route_disp}合計'
+                ship_subtotal[1] = ''
                 for i in range(13):
                     if route_totals[i] != 0:
                         ship_subtotal[i + 2] = format_num(route_totals[i])
@@ -527,7 +530,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 for i in range(14):
                     cat_shipping_totals[i] += route_totals[i]
             cat_subtotal: List[Any] = [None] * 16
-            cat_subtotal[1] = f'{cat_disp}出荷合計'
+            cat_subtotal[0] = f'{cat_disp}出荷合計'
+            cat_subtotal[1] = ''
             for i in range(13):
                 if cat_shipping_totals[i] != 0:
                     cat_subtotal[i + 2] = format_num(cat_shipping_totals[i])
