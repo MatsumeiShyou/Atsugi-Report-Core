@@ -238,12 +238,22 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_outbound["経路分類"] = df_outbound.apply(classify_outbound_route, axis=1)
     
     # --- 不変データ射影（店舗リネージ保持と管理会社正規化） ---
+    import re
+    def normalize_client_name(name: str) -> str:
+        if not name: return ""
+        name = name.translate(str.maketrans('Ａ-Ｚａ-ｚ０-９', 'A-Za-z0-9'))
+        name = re.sub(r'\(株\)|㈱|株式会社|\(有\)|㈲|有限会社|\(同\)|合同会社', '', name)
+        name = re.sub(r'[\s　]+', '', name)
+        return name
+
     def map_supplier(sup: str, is_yokomochi: bool, category: str) -> str:
         if is_yokomochi or not sup: return sup
         if category == "⑤その他": return sup
+        norm_sup = normalize_client_name(sup)
         for mc in MAJOR_CLIENTS:
-            if mc and mc in sup:
-                return sup
+            if not mc: continue
+            if normalize_client_name(mc) in norm_sup or norm_sup in normalize_client_name(mc):
+                return mc
         return "そのた"
     
     df_inbound["store_name"] = df_inbound["仕入先名"].fillna("").astype(str).str.strip()
