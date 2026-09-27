@@ -260,13 +260,17 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
             if not mc: continue
             if normalize_client_name(mc) in norm_sup or norm_sup in normalize_client_name(mc):
                 return mc
-        return "その他（未分類）"
+        return sup
     
     df_inbound["store_name"] = df_inbound["仕入先名"].fillna("").astype(str).str.strip()
     df_inbound["payee_name"] = df_inbound["支払先名"].fillna("").astype(str).str.strip()
     
     df_inbound["normalized_parent"] = df_inbound.apply(
-        lambda r: str(r.get("支払先名", "")).strip() if str(r.get("支払先名", "")).strip() != "" else str(r.get("仕入先名", "")).strip(),
+        lambda r: map_supplier(
+            r["store_name"] if r["store_name"] else r["payee_name"],
+            bool(r.get("横持フラグ", False)),
+            str(r.get("大品目分類", ""))
+        ),
         axis=1
     )
     
@@ -382,13 +386,149 @@ def format_num(val: float) -> str:
         return "0"
     return f"{int(val):,}"
 
-def build_macro_report(
-    df_inbound: pd.DataFrame,
-    df_outbound: Optional[pd.DataFrame] = None,
-    target_year: Optional[int] = None,
-    target_month: Optional[int] = None
-) -> List[List[Any]]:
-    return [["サマリーはメインシートに統合されました"]]
+def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFrame]=None, target_year: Optional[int]=None, target_month: Optional[int]=None) -> List[List[Any]]:
+    grid: List[List[Any]] = []
+    df_in = df_inbound.copy()
+    if 'transaction_date' in df_in.columns:
+        df_in['_date'] = pd.to_datetime(df_in['transaction_date'], errors='coerce')
+        df_in['_ym'] = df_in['_date'].dt.to_period('M')
+    else:
+        df_in['_date'] = pd.NaT
+        df_in['_ym'] = pd.NaT
+    if target_year is None or target_month is None:
+        target_year, target_month = (2026, 8)
+        valid_dates = df_in['_date'].dropna()
+        if not valid_dates.empty:
+            mode_date = valid_dates.dt.to_period('M').mode()
+            if not mode_date.empty:
+                target_year, target_month = (int(mode_date.iloc[0].year), int(mode_date.iloc[0].month))
+    target_period = pd.Period(f'{target_year:04d}-{target_month:02d}', freq='M')
+    unique_yms = [target_period - 12 + i for i in range(13)]
+    ym_to_col = {ym: i + 2 for i, ym in enumerate(unique_yms)}
+    top_header: List[Any] = [None] * 16
+    for ym, col_idx in ym_to_col.items():
+        top_header[col_idx] = str(ym)
+    top_header[15] = '前年同月差分'
+    grid.append(top_header)
+    for cat_info in MASTER_HIERARCHY:
+        cat_id = cat_info['cat_id']
+        grid.append([cat_id] + [None] * 15)
+        for route_info in cat_info['routes']:
+            route_id = route_info['route_id']
+            route_match_list = route_info['route_match']
+            if cat_id == '＜参考＞事業所間横持ち':
+                route_df = df_in[df_in['横持フラグ'] == True].copy()
+            else:
+                route_df = df_in[(df_in['大品目分類'] == cat_id) & df_in['経路分類'].isin(route_match_list) & (df_in['横持フラグ'] == False)].copy()
+            if route_df.empty:
+                continue
+            grid.append(['', route_id] + [None] * 14)
+            route_totals = [0.0] * 14
+            if not route_df.empty:
+                if cat_id == '＜参考＞事業所間横持ち':
+                    group_keys = ['仕入先名', '品名']
+                else:
+                    group_keys = ['normalized_parent'] if 'normalized_parent' in route_df.columns else ['仕入先名']
+                grouped = route_df.groupby(group_keys)
+                for keys, supp_df in sorted(grouped):
+                    row_data: List[Any] = [None] * 16
+                    row_data[0] = ''
+                    keys_tuple: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
+                    if cat_id == '＜参考＞事業所間横持ち':
+                        origin = str(keys_tuple[0]).replace('(横持)', '').replace('事業所', '').strip()
+                        row_data[1] = f'{origin}→厚木'
+                    else:
+                        row_data[1] = keys_tuple[0]
+                    ym_sums = supp_df.groupby('_ym')['実重量'].sum()
+                    val_last_year = 0.0
+                    val_this_month = 0.0
+                    for ym_val, weight in ym_sums.items():
+                        ym = cast(pd.Period, ym_val)
+                        if ym in ym_to_col:
+                            c_idx = ym_to_col[ym]
+                            row_data[c_idx] = format_num(float(weight))
+                            route_totals[c_idx - 2] += float(weight)
+                            if ym == unique_yms[0]:
+                                val_last_year = float(weight)
+                            elif ym == unique_yms[12]:
+                                val_this_month = float(weight)
+                    diff = val_this_month - val_last_year
+                    row_data[15] = format_num(diff)
+                    route_totals[13] += diff
+                    grid.append(row_data)
+            subtotal: List[Any] = [None] * 16
+            subtotal[0] = ''
+            subtotal[1] = f"{route_id.split('.')[-1]}合計" if '.' in route_id else f'{route_id}合計'
+            for i in range(13):
+                if route_totals[i] > 0 or route_totals[i] < 0:
+                    subtotal[i + 2] = format_num(route_totals[i])
+            subtotal[15] = format_num(route_totals[13])
+            grid.append(subtotal)
+        grid.append([None] * 16)
+    if df_outbound is not None and (not df_outbound.empty):
+        df_out = df_outbound.copy()
+        if 'transaction_date' in df_out.columns:
+            df_out['_date'] = pd.to_datetime(df_out['transaction_date'], errors='coerce')
+            df_out['_ym'] = df_out['_date'].dt.to_period('M')
+        else:
+            df_out['_date'] = pd.NaT
+            df_out['_ym'] = pd.NaT
+        grid.append(['＜出荷＞'] + [None] * 15)
+        for cat_info in SHIPPING_HIERARCHY:
+            cat_id = cat_info['cat_id']
+            cat_disp = cat_info['cat_disp']
+            grid.append(['', cat_id] + [None] * 14)
+            cat_shipping_totals = [0.0] * 14
+            for route_info in cat_info['routes']:
+                route_id = route_info['route_id']
+                route_match_list = route_info['route_match']
+                route_disp = route_info['route_disp']
+                route_df = df_out[(df_out['大品目分類'] == cat_id) & df_out['経路分類'].isin(route_match_list)].copy()
+                grid.append(['', route_id] + [None] * 14)
+                route_totals = [0.0] * 14
+                if not route_df.empty:
+                    group_keys = ['client_name', 'spec_name'] if 'client_name' in route_df.columns else ['得意先名', '品名']
+                    grouped = route_df.groupby(group_keys)
+                    for keys, supp_df in sorted(grouped):
+                        ship_row_data: List[Any] = [None] * 16
+                        ship_row_data[0] = ''
+                        keys_tuple = keys if isinstance(keys, tuple) else (keys,)
+                        ship_row_data[1] = f'{keys_tuple[0]} {keys_tuple[1]}'.strip() if len(keys_tuple) >= 2 else str(keys_tuple[0])
+                        ym_sums = supp_df.groupby('_ym')['実重量'].sum()
+                        val_last_year = 0.0
+                        val_this_month = 0.0
+                        for ym_val, weight in ym_sums.items():
+                            ym = cast(pd.Period, ym_val)
+                            if ym in ym_to_col:
+                                c_idx = ym_to_col[ym]
+                                ship_row_data[c_idx] = format_num(float(weight))
+                                route_totals[c_idx - 2] += float(weight)
+                                if ym == unique_yms[0]:
+                                    val_last_year = float(weight)
+                                elif ym == unique_yms[12]:
+                                    val_this_month = float(weight)
+                        ship_row_data[15] = format_num(val_this_month - val_last_year)
+                        route_totals[13] += val_this_month - val_last_year
+                        grid.append(ship_row_data)
+                ship_subtotal: List[Any] = [None] * 16
+                ship_subtotal[1] = f'{route_disp}合計'
+                for i in range(13):
+                    if route_totals[i] != 0:
+                        ship_subtotal[i + 2] = format_num(route_totals[i])
+                ship_subtotal[15] = format_num(route_totals[13])
+                grid.append(ship_subtotal)
+                for i in range(14):
+                    cat_shipping_totals[i] += route_totals[i]
+            cat_subtotal: List[Any] = [None] * 16
+            cat_subtotal[1] = f'{cat_disp}出荷合計'
+            for i in range(13):
+                if cat_shipping_totals[i] != 0:
+                    cat_subtotal[i + 2] = format_num(cat_shipping_totals[i])
+            cat_subtotal[15] = format_num(cat_shipping_totals[13])
+            grid.append(cat_subtotal)
+            grid.append([None] * 16)
+    return grid
+
 
 
 def _filter_month(df: pd.DataFrame, year: int, month: int) -> pd.DataFrame:
