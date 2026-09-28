@@ -420,7 +420,12 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                     keys_tuple: Tuple[Any, ...] = keys if isinstance(keys, tuple) else (keys,)
                     if cat_id == '＜参考＞事業所間横持ち':
                         origin = str(keys_tuple[0]).replace('(横持)', '').replace('事業所', '').strip()
-                        row_data[1] = f'{origin}→厚木'
+                        row_data[1] = ''
+                        row_data[2] = f'{origin}→厚木'
+                        row_data[3] = ''
+                        if len(keys_tuple) > 1:
+                            row_data[4] = str(keys_tuple[1]).strip()
+                        row_data[5] = ''
                     else:
                         if len(group_keys) >= 4:
                             parent_str = str(keys_tuple[0]).strip()
