@@ -162,10 +162,9 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df["実重量"] = raw_net_s + raw_adj_s
 
     # --- 2. 怪しいデータの検知と警告（システムが人間に判断を仰ぐ） ---
-    # 金額や単価がゼロ、または正味重量がゼロの伝票はダミー（調整）の可能性が高いため、ログに出力して人間に知らせる。
-    if "金額" in df.columns:
-        amt_s = pd.to_numeric(df["金額"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-        suspicious_mask = ((amt_s == 0) & (df["実重量"] > 0)) | ((raw_net_s == 0) & (raw_adj_s != 0))
+    # 正味重量がゼロで調整重量がある伝票はダミー（調整）の可能性が高いため、ログに出力して人間に知らせる。
+    if "実重量" in df.columns:
+        suspicious_mask = ((raw_net_s == 0) & (raw_adj_s != 0))
         
         # ホワイトリストに登録されているものは警告から外す
         if white_list:
@@ -175,11 +174,11 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
             
         suspicious_df = df[suspicious_mask]
         if not suspicious_df.empty:
-            print("\n[WARNING] 以下の伝票は金額ゼロまたは正味重量ゼロのため、除外すべきダミー伝票の可能性があります。")
+            print("\n[WARNING] 以下の伝票は正味重量がゼロ（調整のみ）のため、除外すべきダミー伝票の可能性があります。")
             print("事務員様にて内容をご確認いただき、除外すべき場合はシステム(Supabase)の rule_master テーブルへ BLACK としてご登録ください。")
             print("正規の資源であり集計を通す場合は WHITE としてご登録ください。次回以降アラートが出なくなります。")
             for _, row in suspicious_df.iterrows():
-                print(f"  - 仕入先: {row.get('仕入先名', '')}, 品名: {row.get('品名', '')}, 実重量: {row.get('実重量', 0)}kg, 金額: {row.get('金額', 0)}円")
+                print(f"  - 仕入先: {row.get('仕入先名', '')}, 品名: {row.get('品名', '')}, 実重量: {row.get('実重量', 0)}kg")
             print("--------------------------------------------------------------------------------")
 
 
