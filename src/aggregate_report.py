@@ -359,6 +359,10 @@ def format_num(val: float) -> str:
         return "0"
     return f"{int(val):,}"
 
+
+def _normalize_for_compare(s: str) -> str:
+    return str(s).strip().replace('㈱', '(株)').replace('㈲', '(有)')
+
 def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFrame]=None, target_year: Optional[int]=None, target_month: Optional[int]=None) -> List[List[Any]]:
     grid: List[List[Any]] = []
     df_in = df_inbound.copy()
@@ -419,8 +423,10 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         row_data[1] = f'{origin}→厚木'
                     else:
                         if len(group_keys) >= 4:
-                            row_data[1] = str(keys_tuple[0]).strip()
-                            row_data[2] = str(keys_tuple[1]).strip()
+                            parent_str = str(keys_tuple[0]).strip()
+                            client_str = str(keys_tuple[1]).strip()
+                            row_data[1] = '' if _normalize_for_compare(parent_str) == _normalize_for_compare(client_str) else parent_str
+                            row_data[2] = client_str
                             row_data[3] = str(keys_tuple[2]).strip()
                             row_data[4] = str(keys_tuple[3]).strip()
                             if len(group_keys) >= 5:
@@ -494,8 +500,10 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         ship_row_data[0] = ''
                         keys_tuple = keys if isinstance(keys, tuple) else (keys,)
                         if len(group_keys) >= 4:
-                            ship_row_data[1] = str(keys_tuple[0]).strip()
-                            ship_row_data[2] = str(keys_tuple[1]).strip()
+                            parent_str = str(keys_tuple[0]).strip()
+                            client_str = str(keys_tuple[1]).strip()
+                            ship_row_data[1] = '' if _normalize_for_compare(parent_str) == _normalize_for_compare(client_str) else parent_str
+                            ship_row_data[2] = client_str
                             ship_row_data[3] = str(keys_tuple[2]).strip()
                             ship_row_data[4] = str(keys_tuple[3]).strip()
                             if len(group_keys) >= 5:
