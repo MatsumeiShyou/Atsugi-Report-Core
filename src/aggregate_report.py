@@ -505,7 +505,7 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 grid.append([route_id, ''] + [None] * 18)
                 route_totals = [0.0] * 14
                 if not route_df.empty:
-                    group_keys = ['client_name', '得意先名', '運送店名(売上)', '品名', '取引区分名称(売上)'] if 'client_name' in route_df.columns else ['得意先名', '運送店名(売上)', '品名', '取引区分名称(売上)']
+                    group_keys = ['client_name', '得意先名', '運送店名', '品名', '取引区分'] if 'client_name' in route_df.columns else ['得意先名', '運送店名', '品名', '取引区分']
                     grouped = route_df.groupby(group_keys)
                     for keys, supp_df in sorted(grouped):
                         ship_row_data: List[Any] = [None] * 20

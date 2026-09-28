@@ -44,6 +44,27 @@ def load_to_db(df: pd.DataFrame, source_file: str) -> None:
         
     # CSV内の「年月日」列をSupabase側の必須列である「transaction_date」にリネーム
     df_copy = df_copy.rename(columns={'年月日': 'transaction_date'})
+    
+    # --- 出荷（売上）用の列名を、DBスキーマに定義された入荷用の列名に統合する ---
+    rename_map = {
+        '出荷日付': 'transaction_date',
+        '売上日付': 'transaction_date',
+        '商品名(売上)': '品名',
+        '運送店名(売上)': '運送店名',
+        '正味重量(売上)': '正味重量',
+        '単価(売上)': '単価',
+        '売上金額': '金額',
+        '取引区分名称(売上)': '取引区分',
+        'データ区分名称(売上)': 'デ区',
+        '車番(売上)': '車番'
+    }
+    for old_col, new_col in rename_map.items():
+        if old_col in df_copy.columns:
+            if new_col in df_copy.columns:
+                df_copy[new_col] = df_copy[new_col].fillna(df_copy[old_col])
+            else:
+                df_copy = df_copy.rename(columns={old_col: new_col})
+    # --------------------------------------------------------------------------
         
     keep_cols = [col for col in df_copy.columns if str(col) in valid_columns]
     dropped_cols = [col for col in df_copy.columns if str(col) not in valid_columns]
