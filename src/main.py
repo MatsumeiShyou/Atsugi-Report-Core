@@ -5,8 +5,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from google_api import fetch_csv_from_drive, write_to_sheets
-from supabase_client import load_to_db, extract_from_db
-from aggregate_report import transform_raw_data, build_macro_report, build_micro_report, generate_warnings, purge_zero_sum_groups
+from aggregate_report import prepare_raw_data, transform_raw_data, build_macro_report, build_micro_report, generate_warnings, purge_zero_sum_groups
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -35,28 +34,12 @@ def main() -> None:
         if not dataframes:
             raise ValueError("Google Driveから対象のCSVデータが1件も取得できませんでした。")
 
-        # [L] Load to DB (raw_nyuka_data)
-        logger.info("Supabaseへ生データを保存します...")
-        combined_raw = pd.concat(dataframes, ignore_index=True)
-        import datetime
-        from supabase_client import get_supabase_client
-        run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        source_completed = f"{run_id}_completed"
-        
-        combined_raw["source_file"] = source_completed
-        try:
-            load_to_db(combined_raw, source_file=source_completed)
-        except Exception as e:
-            logger.error(f"DBへの保存中にエラーが発生しました。ロールバックします: {e}")
-            try:
-                get_supabase_client().table("raw_nyuka_data").delete().eq("source_file", source_completed).execute()
-            except:
-                pass
-            raise e
-
         # [T] Transform (Split-Pipeline Pattern: Inbound / Outbound Physical Separation)
-        logger.info("Supabaseからデータを抽出し、変換処理を行います...")
-        raw_df = extract_from_db()
+        # AG-0003: 以前は raw_nyuka_data（Supabase）へ書き込んで読み戻していたが、
+        # 一時置き場でしかなくDB容量を累積的に消費していたため、メモリ上で直接変換する。
+        logger.info("取得したCSVを整形し、変換処理を行います...")
+        combined_raw = pd.concat(dataframes, ignore_index=True)
+        raw_df = prepare_raw_data(combined_raw)
             
         df_inbound, df_outbound = transform_raw_data(raw_df)
         

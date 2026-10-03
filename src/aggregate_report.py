@@ -72,6 +72,83 @@ def purge_zero_sum_groups(df: pd.DataFrame, is_inbound: bool) -> pd.DataFrame:
     return df[keep_mask].copy()
 
 
+# --- 生データの列定義（AG-0003） ---
+# 以前は Supabase の raw_nyuka_data テーブルを経由しており、テーブル定義が暗黙の
+# 列ホワイトリスト・型変換として機能していた。DB往復を廃止した際、出力を変えないよう
+# 当時のテーブル定義（業務列のみ）をここへ移した。ここに無い列（例: ﾔｰﾄﾞｺｰﾄﾞ, デ区）は
+# 従来どおり変換処理に渡らない。
+RAW_DATE_COLUMN = "transaction_date"
+RAW_TEXT_COLUMNS: List[str] = [
+    "車番", "備考", "仕入先コード", "仕入先名", "品名",
+    "支払先名", "運送店名", "自社他社区分", "得意先名", "取引区分",
+]
+RAW_NUMERIC_COLUMNS: List[str] = ["数量", "正味重量", "調整重量", "単価", "金額"]
+RAW_COLUMNS: List[str] = [RAW_DATE_COLUMN] + RAW_TEXT_COLUMNS + RAW_NUMERIC_COLUMNS
+
+# 出荷（売上）CSVの列名 → 入荷側の列名への統合
+SALES_COLUMN_RENAME_MAP: Dict[str, str] = {
+    '出荷日付': 'transaction_date',
+    '売上日付': 'transaction_date',
+    '商品名(売上)': '品名',
+    '運送店名(売上)': '運送店名',
+    '正味重量(売上)': '正味重量',
+    '単価(売上)': '単価',
+    '売上金額': '金額',
+    '取引区分名称(売上)': '取引区分',
+    'データ区分名称(売上)': 'デ区',
+    '車番(売上)': '車番'
+}
+
+
+def prepare_raw_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Driveから取得したCSVを結合したDataFrameを、transform_raw_data が受け取る形に整える。
+    旧DB往復（load_to_db → extract_from_db）と同じ結果になるようにしている:
+      - ヘッダーの空白除去、年月日→transaction_date、売上列の統合
+      - RAW_COLUMNS 以外の列は捨て、CSVに無い列は None で補う
+      - 日付は 'YYYY-MM-DD' 文字列、text列は str、numeric列は数値、欠損は None
+    値を解釈できない場合は、旧DB（INSERT失敗）と同様に例外を送出する（フェイルファスト）。
+    """
+    import numpy as np
+
+    df_copy = df.copy()
+    # CSVのヘッダーに含まれる全角・半角スペースを完全に除去
+    df_copy.columns = df_copy.columns.astype(str).str.replace(r'\s+', '', regex=True)
+    # CSV内の「年月日」列を「transaction_date」にリネーム
+    df_copy = df_copy.rename(columns={'年月日': 'transaction_date'})
+
+    for old_col, new_col in SALES_COLUMN_RENAME_MAP.items():
+        if old_col in df_copy.columns:
+            if new_col in df_copy.columns:
+                df_copy[new_col] = df_copy[new_col].fillna(df_copy[old_col])
+            else:
+                df_copy = df_copy.rename(columns={old_col: new_col})
+
+    dropped_cols = [c for c in df_copy.columns if c not in RAW_COLUMNS]
+    if dropped_cols:
+        logger.info(f"変換に使わない列（ホワイトリスト外）を除外します: {dropped_cols}")
+    out = df_copy.reindex(columns=RAW_COLUMNS).astype(object).replace({np.nan: None})
+
+    # 日付（旧DBの date 型相当）
+    dates = out[RAW_DATE_COLUMN]
+    parsed = pd.to_datetime(dates, errors="coerce", format="mixed")
+    bad = dates.notna() & parsed.isna()
+    if bad.any():
+        raise ValueError(f"transaction_date を日付として解釈できない行があります（{int(bad.sum())}件）")
+    out[RAW_DATE_COLUMN] = [d.strftime("%Y-%m-%d") if pd.notna(d) else None for d in parsed]
+
+    # 数値（旧DBの numeric 型相当）
+    for col in RAW_NUMERIC_COLUMNS:
+        out[col] = [None if v is None else pd.to_numeric(v) for v in out[col]]
+
+    # 文字列（旧DBの text 型相当）
+    for col in RAW_TEXT_COLUMNS:
+        out[col] = [None if v is None else str(v) for v in out[col]]
+
+    # 旧 extract_from_db と同じく、レコードからDataFrameを組み直して dtype を推論させる
+    return pd.DataFrame(out.to_dict(orient="records"), columns=RAW_COLUMNS)
+
+
 def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     生データをクレンジングし、入出荷物理分離（Split-Pipeline Pattern）を行って

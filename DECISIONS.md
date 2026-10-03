@@ -30,3 +30,9 @@
 - alternative: 手動でハードコードを書き換える
 - reason: 人間の取捨選択をExcelのコピペだけで完結させ、ソースコードの破損リスクを排除するため
 - approved-by: human
+## AG-0003 2026-10-04 raw_nyuka_data へのDB往復を廃止しメモリ上で変換
+- choice: B
+- scope: src/main.py, src/supabase_client.py, src/aggregate_report.py, tests/test_prepare_raw_data.py
+- alternative: A=DBへの書き込みは残し、処理成功後に古いスナップショットを削除する
+- reason: DBは同じ実行の中で書いてすぐ読み戻す一時置き場で、履歴は参照されていない。毎回のスナップショットが累積してFree枠を187%超過させていたため、中継そのものを廃止する（単純さ・単一の真実源を優先）。挙動を変えないよう、DBが暗黙に行っていた列ホワイトリストと型変換は prepare_raw_data に移す
+- approved-by: human
