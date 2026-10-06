@@ -1,10 +1,14 @@
 ﻿import pytest
 import pandas as pd
 import sys
+import os
 sys.path.insert(0, 'src')
 from aggregate_report import transform_raw_data, build_micro_report, _filter_month
 
 def test_totals_match():
+    # 生データ（業務データ）はリポジトリに含めないため、無い環境ではスキップする
+    if not os.path.exists('Artifacts/仕入日報問合せ.csv'):
+        pytest.skip('Artifacts/仕入日報問合せ.csv is missing')
     df_raw = pd.read_csv('Artifacts/仕入日報問合せ.csv', encoding='cp932', low_memory=False)
     df_in, df_out = transform_raw_data(df_raw)
     if "年月日" in df_in.columns:
