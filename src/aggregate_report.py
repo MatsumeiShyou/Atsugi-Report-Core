@@ -5,7 +5,7 @@ import unicodedata
 import datetime
 
 # --- 主要取引先リスト ---
-from mapping_definitions import ITEM_CATEGORY_MAP
+from mapping_definitions import ITEM_CATEGORY_MAP, CLIENT_ITEM_CATEGORY_OVERRIDES
 # ---------------------------------------------------
 
 logger = logging.getLogger(__name__)
@@ -280,6 +280,10 @@ def transform_with_excluded(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
             return "＜参考＞事業所間横持ち"
 
         item_str = str(row.get("品名", ""))
+        partner = str(row.get("得意先名") or row.get("仕入先名") or "")
+        for (client_kw, item), category in CLIENT_ITEM_CATEGORY_OVERRIDES.items():
+            if client_kw in partner and item_str == item:
+                return category
         for k, v in ITEM_CATEGORY_MAP.items():
             if k in item_str:
                 return v

@@ -178,3 +178,33 @@ def test_missing_daily_csv_stops_the_run(monkeypatch):
     select_target_csv_files = _select_target_csv_files(monkeypatch)
     with pytest.raises(ValueError, match="出荷日報問合せ.csv"):
         select_target_csv_files([{"id": "b", "name": "仕入日報問合せ.csv", "modifiedTime": "2026-10-05T15:00:00Z"}])
+
+
+def test_shipping_items_categorized_like_clerk(caplog):
+    """出荷の未登録品名は事務員の計上先に合わせる: 塩ビ・フレコン=プラ類、ティーエスエンバイロの残紙=新聞、
+    その他の残紙・カップ色トリム・ビニール重袋・白アート=その他（未登録の警告も出さない）"""
+    import logging
+    base = {"年月日": "2026/09/03", "取引区分": "持込", "正味重量": 1000, "調整重量": 0}
+    rows = [
+        {**base, "得意先名": "和円商事", "品名": "塩ビ"},
+        {**base, "得意先名": "和円商事", "品名": "フレコンプレス"},
+        {**base, "得意先名": "ﾃｨｰｴｽｴﾝﾊﾞｲﾛ", "品名": "残紙"},
+        {**base, "得意先名": "㈱岩本商店", "品名": "残紙"},
+        {**base, "得意先名": "日誠産業", "品名": "カップ色トリムプレス"},
+        {**base, "得意先名": "大王製紙", "品名": "ビニール重袋プレス"},
+        {**base, "得意先名": "王子ﾏﾃﾘｱ㈱富士", "品名": "白アートプレス"},
+    ]
+    with caplog.at_level(logging.WARNING, logger="aggregate_report"):
+        _, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(rows)))
+    got = dict(zip(df_out["得意先名"] + "/" + df_out["品名"], df_out["大品目分類"]))
+    assert got == {
+        "和円商事/塩ビ": "④プラ類",
+        "和円商事/フレコンプレス": "④プラ類",
+        "ティーエスエンバイロ/残紙": "②新聞",
+        "(株)岩本商店/残紙": "⑤その他",
+        "日誠産業/カップ色トリムプレス": "⑤その他",
+        "大王製紙/ビニール重袋プレス": "⑤その他",
+        "王子マテリア(株)富士/白アートプレス": "⑤その他",
+    }
+    unknown = [r.getMessage() for r in caplog.records if "Unknown item mapped" in r.getMessage()]
+    assert not [m for m in unknown if any(row["品名"] in m for row in rows)], unknown
