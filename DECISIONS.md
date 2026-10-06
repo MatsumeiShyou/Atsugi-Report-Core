@@ -54,3 +54,9 @@
 - alternative: A=事務員の8-8シートの行一覧（約620行）と「取引先×商品×取引区分×運送店 → 行」の対応をCSVで持ち、事務員と同じ並び・略称・値0の行で出力する
 - reason: 集計表の目的は厚木事業所のKPI管理・所長会議資料・経営分析であり、事務員の表との行単位の一致は目的ではない（事務員の表との比較は開発中の正確性検証のため）。行マスタは毎月の行割当と品目区分の二重管理を生むため持たない。正確性は品目×経路の合計で担保する
 - approved-by: human
+## AG-0007 2026-10-06 Supabase の rule_master（BLACK/WHITE）を集計で読まない
+- choice: B
+- scope: src/aggregate_report.py, src/supabase_client.py, tests/test_bug_reproduction.py
+- alternative: A=コードは変えず、Supabase の rule_master の中身を修正する（BLACK「神奈中商事」と悪影響のある WHITE を削除）。除外ルールの2か所管理が続く
+- reason: 人間の判断（会話上の案A）。除外ルールがコード（テスト済み）と rule_master（テスト外、2026-09-20登録）の2か所にあり、rule_master が計上/除外の事務員一致率を 98.64%→95.94% に下げていた（BLACK「神奈中商事」で通常入荷 約2.1万kg/月を除外、WHITE で運搬料・紙管の本数伝票・プレス加工賃を救済）。登録目的（金額ゼロの救済、神奈中のマイナス相殺の除外）はいずれもコード側で達成済み。単一の真実源としてルールはコードとテストだけで持つ。AG-0005 の「WHITE リストで救済可」は本決定で無効
+- approved-by: human

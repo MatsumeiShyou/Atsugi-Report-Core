@@ -14,32 +14,6 @@ def get_supabase_client() -> Client:
         raise ValueError("環境変数 SUPABASE_URL または SUPABASE_KEY が設定されていません。")
     return create_client(url, key)
 
-def fetch_rule_master() -> dict[str, list[str]]:
-    """
-    Supabaseの rule_master テーブルからブラックリスト/ホワイトリストを取得する。
-    戻り値: {"BLACK": ["キーワード1", ...], "WHITE": ["キーワード2", ...]}
-    """
-    client = get_supabase_client()
-    try:
-        res = client.table("rule_master").select("*").execute()
-    except Exception as e:
-        logger.warning(f"rule_master テーブルの取得に失敗しました（未作成の可能性があります）: {e}")
-        return {"BLACK": [], "WHITE": []}
-        
-    rules: dict[str, list[str]] = {"BLACK": [], "WHITE": []}
-    if res.data and isinstance(res.data, list):
-        for row in res.data:
-            if not isinstance(row, dict):
-                continue
-            rtype = str(row.get("rule_type", ""))
-            kw = row.get("keyword")
-            if rtype in rules and kw:
-                # 表記揺れ吸収のため、大文字化・空白削除しておく
-                import unicodedata
-                norm_kw = unicodedata.normalize('NFKC', str(kw)).replace(" ", "").replace("　", "").upper()
-                rules[rtype].append(norm_kw)
-    return rules
-
 import tempfile
 import os
 

@@ -210,17 +210,9 @@ def transform_with_excluded(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     # --- 1. 明示的な除外（人間が定義した除外キーワード） ---
     # ※全角半角・カタカナの揺れは上部の NFKC 正規化で吸収済み。
     # ※大文字小文字の揺れを吸収するため、全て upper() にして比較する。
-    try:
-        from supabase_client import fetch_rule_master
-        rules_db = fetch_rule_master()
-        black_list = rules_db.get("BLACK", [])
-        white_list = rules_db.get("WHITE", [])
-    except Exception:
-        black_list = []
-        white_list = []
-
-    exclude_item_keywords = ["運搬", "取扱", "手数料", "加工賃", "紹介料", "リース", "機密 ブリヂストン~丸富製紙", "機密 ブリヂストン~鶴見沼津", "補助金", "サントリー", r"紙管\(本\)"] + black_list
-    exclude_vendor_keywords = ["U-NET", "ユーネット", "運賃", "運搬"] + black_list
+    # ※除外ルールはここ（とテスト）だけで持つ。Supabase の rule_master は読まない（AG-0007）
+    exclude_item_keywords = ["運搬", "取扱", "手数料", "加工賃", "紹介料", "リース", "機密 ブリヂストン~丸富製紙", "機密 ブリヂストン~鶴見沼津", "補助金", "サントリー", r"紙管\(本\)"]
+    exclude_vendor_keywords = ["U-NET", "ユーネット", "運賃", "運搬"]
 
     item_str = df.get("品名", pd.Series([""]*len(df))).astype(str).str.upper()
     supp_str = df.get("仕入先名", pd.Series([""]*len(df))).astype(str).str.upper()
@@ -241,13 +233,6 @@ def transform_with_excluded(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     item_code = pd.to_numeric(df.get("商品コード", pd.Series([None]*len(df), index=df.index)), errors="coerce")
     mask_temp_item = item_code == 9999
     mask_exclude = mask_exclude | mask_temp_item
-
-    # ホワイトリスト（許可）はブラックリスト（除外）よりも優先される（救済）
-    if white_list:
-        mask_white_item = item_str.str.contains("|".join(white_list).upper(), na=False, regex=True)
-        mask_white_vendor = supp_str.str.contains("|".join(white_list).upper(), na=False, regex=True) | \
-                            payee_str.str.contains("|".join(white_list).upper(), na=False, regex=True)
-        mask_exclude = mask_exclude & ~(mask_white_item | mask_white_vendor)
 
     # 除外確定（理由は後の判定ほど優先）
     reason = pd.Series("", index=df.index)

@@ -208,3 +208,17 @@ def test_shipping_items_categorized_like_clerk(caplog):
     }
     unknown = [r.getMessage() for r in caplog.records if "Unknown item mapped" in r.getMessage()]
     assert not [m for m in unknown if any(row["品名"] in m for row in rows)], unknown
+
+
+def test_supabase_rule_master_does_not_change_results(monkeypatch):
+    """AG-0007: 除外ルールはコードとテストだけで持つ。Supabase の rule_master（BLACK/WHITE）は読まない。
+    本番の rule_master は BLACK「神奈中商事」で通常入荷を落とし、WHITE「山櫻」で紙管の本数伝票を救っていた"""
+    import supabase_client
+    monkeypatch.setattr(supabase_client, "fetch_rule_master",
+                        lambda: {"BLACK": ["神奈中商事"], "WHITE": ["山櫻"]}, raising=False)
+    df = _inbound([
+        {"仕入先名": "(株)神奈中商事", "品名": "段ボールバラ", "取引区分": "持込", "正味重量": 1000},
+        {"仕入先名": "(株)山櫻八王子の森工場", "品名": "紙管(本)", "正味重量": 80},
+    ])
+    assert df.index.tolist() == ["(株)神奈中商事"]
+    assert df["実重量"].sum() == 1000
