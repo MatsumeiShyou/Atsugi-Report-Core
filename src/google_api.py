@@ -2,7 +2,7 @@ import os
 import time
 import random
 import logging
-from typing import Any, List, Callable
+from typing import Any, Dict, List, Callable
 from functools import wraps
 from datetime import datetime
 from dateutil.relativedelta import relativedelta # type: ignore
@@ -62,6 +62,25 @@ def get_credentials() -> Any:
     credentials, _ = google.auth.default(scopes=scopes)
     return credentials
 
+# 計量システムが毎日この名前で上書き保存する累積ファイル。これ以外の名前（手動DLの期間別ファイル等）は
+# 期間が重なり二重計上になるため読まない
+DAILY_CSV_NAMES: List[str] = ["仕入日報問合せ.csv", "出荷日報問合せ.csv"]
+
+
+def select_target_csv_files(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Driveのファイル一覧から、読むべき自動保存CSVだけを選ぶ（同名が複数あれば更新日時が最新のもの）"""
+    selected: List[Dict[str, Any]] = []
+    for name in DAILY_CSV_NAMES:
+        same = [item for item in items if item.get("name") == name]
+        if not same:
+            raise ValueError(f"Driveに自動保存CSV「{name}」が見つかりません。不完全な集計を避けるため停止します。")
+        selected.append(max(same, key=lambda item: str(item.get("modifiedTime", ""))))
+    ignored = [str(item.get("name")) for item in items if item not in selected]
+    if ignored:
+        logger.info(f"自動保存CSV以外のファイルは読み込みません: {ignored}")
+    return selected
+
+
 @exponential_backoff_with_jitter(max_retries=3)
 def fetch_csv_from_drive() -> List[pd.DataFrame]:
     """対象期間（13ヶ月分）のCSVをDriveから取得する"""
@@ -81,7 +100,7 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
     logger.info(f"Drive API検索クエリ: {query}")
     results = service.files().list(
         q=query, 
-        fields="files(id, name, mimeType)",
+        fields="files(id, name, mimeType, modifiedTime)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
     ).execute()
@@ -99,12 +118,9 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
         except Exception as e:
             logger.error(f"親フォルダへのアクセスに失敗しました: {e}")
 
-    csv_items = [item for item in items if item.get('name', '').lower().endswith('.csv')]
+    csv_items = select_target_csv_files(items)
 
     dataframes: List[pd.DataFrame] = []
-    if not csv_items:
-        logger.info("対象のCSVファイルは見つかりませんでした。")
-        return dataframes
 
     import io
     for item in csv_items:

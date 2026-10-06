@@ -5,7 +5,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from google_api import fetch_csv_from_drive, write_to_sheets
-from aggregate_report import prepare_raw_data, transform_raw_data, build_macro_report, build_micro_report, generate_warnings, purge_zero_sum_groups
+from aggregate_report import prepare_raw_data, transform_with_excluded, build_macro_report, build_micro_report, build_excluded_report, generate_warnings, purge_zero_sum_groups
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -41,7 +41,7 @@ def main() -> None:
         combined_raw = pd.concat(dataframes, ignore_index=True)
         raw_df = prepare_raw_data(combined_raw)
             
-        df_inbound, df_outbound = transform_raw_data(raw_df)
+        df_inbound, df_outbound, df_excluded = transform_with_excluded(raw_df)
         
         # 対象年月の決定（環境変数優先、未指定ならデータの最新月）
         target_yyyymm = os.environ.get("TARGET_YYYYMM")
@@ -92,6 +92,9 @@ def main() -> None:
         logger.info("整形済みデータをスプレッドシートへ出力します...")
         write_to_sheets(macro_df, sheet_name=sheet_name_macro, start_col=1)
         write_to_sheets(micro_df, sheet_name=sheet_name_micro, start_col=1, warning_text=warning_text)
+        # 除外した伝票は黙って捨てず、確認用の一覧に出す（AG-0005）
+        excluded_df = pd.DataFrame(build_excluded_report(df_excluded, target_year=target_year, target_month=target_month))
+        write_to_sheets(excluded_df, sheet_name=f"{sheet_name_micro}除外", start_col=1)
 
         # [L] Directive 4: Generate Audit-Grade Excel Ledger
         from supabase_client import download_template_from_storage

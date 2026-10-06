@@ -77,10 +77,11 @@ def purge_zero_sum_groups(df: pd.DataFrame, is_inbound: bool) -> pd.DataFrame:
 # 列ホワイトリスト・型変換として機能していた。DB往復を廃止した際、出力を変えないよう
 # 当時のテーブル定義（業務列のみ）をここへ移した。ここに無い列（例: ﾔｰﾄﾞｺｰﾄﾞ, デ区）は
 # 従来どおり変換処理に渡らない。
+# 商品コードは AG-0005（臨時品目 9999 の除外）で追加した。
 RAW_DATE_COLUMN = "transaction_date"
 RAW_TEXT_COLUMNS: List[str] = [
     "車番", "備考", "仕入先コード", "仕入先名", "品名",
-    "支払先名", "運送店名", "自社他社区分", "得意先名", "取引区分",
+    "支払先名", "運送店名", "自社他社区分", "得意先名", "取引区分", "商品コード",
 ]
 RAW_NUMERIC_COLUMNS: List[str] = ["数量", "正味重量", "調整重量", "単価", "金額"]
 RAW_COLUMNS: List[str] = [RAW_DATE_COLUMN] + RAW_TEXT_COLUMNS + RAW_NUMERIC_COLUMNS
@@ -154,12 +155,21 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     生データをクレンジングし、入出荷物理分離（Split-Pipeline Pattern）を行って
     (df_inbound, df_outbound) のタプルを返す。
     """
+    df_inbound, df_outbound, _ = transform_with_excluded(df)
+    return df_inbound, df_outbound
+
+
+def transform_with_excluded(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    transform_raw_data の本体。除外した伝票も「除外理由」列付きで返す
+    (df_inbound, df_outbound, df_excluded)。除外は黙って捨てず、月次の確認用一覧に出す。
+    """
     if df.empty:
-        return df.copy(), df.copy()
+        return df.copy(), df.copy(), df.copy()
 
     import unicodedata
     df = df.copy()
-    df.columns = [unicodedata.normalize('NFKC', str(c)).replace(' ', '').replace('　', '') for c in df.columns]
+    df.columns = pd.Index([unicodedata.normalize('NFKC', str(c)).replace(' ', '').replace('　', '') for c in df.columns])
 
     for c in ["仕入先名", "支払先名", "運送店名", "得意先名", "品名", "取引区分", "デ区", "自社他社区分", "備考"]:
         if c not in df.columns:
@@ -169,6 +179,9 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         df[col] = df[col].apply(
             lambda x: unicodedata.normalize('NFKC', x).replace(" ", "").replace("　", "") if isinstance(x, str) else x
         )
+
+    # 山櫻の紙管は入力時に品名へ概算本数を書き足す（紙管80本 等）。事務員は本数に関係なく「紙管」で集計する
+    df["品名"] = df["品名"].str.replace(r"^紙管\d+本$", "紙管", regex=True)
         
     import json
     import os
@@ -206,7 +219,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         black_list = []
         white_list = []
 
-    exclude_item_keywords = ["運搬", "取扱", "手数料", "加工賃", "紹介料", "リース", "機密 ブリヂストン~丸富製紙", "機密 ブリヂストン~鶴見沼津", "補助金"] + black_list
+    exclude_item_keywords = ["運搬", "取扱", "手数料", "加工賃", "紹介料", "リース", "機密 ブリヂストン~丸富製紙", "機密 ブリヂストン~鶴見沼津", "補助金", "サントリー", r"紙管\(本\)"] + black_list
     exclude_vendor_keywords = ["U-NET", "ユーネット", "運賃", "運搬"] + black_list
 
     item_str = df.get("品名", pd.Series([""]*len(df))).astype(str).str.upper()
@@ -223,6 +236,12 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     mask_ambiente_dummy = (df["仕入先名"].str.contains("アンビエンテ|ｱﾝﾋﾞｴﾝﾃ", na=False)) & (df["デ区"] == "仕入調整")
     mask_exclude = mask_exclude | mask_ambiente_dummy
 
+    # 商品コード9999は商品マスタに無い臨時品目（燃えくず・燃殻・産廃・空カゴ運搬など）。
+    # 事務員は入出荷とも一度も計上していない（AG-0005）
+    item_code = pd.to_numeric(df.get("商品コード", pd.Series([None]*len(df), index=df.index)), errors="coerce")
+    mask_temp_item = item_code == 9999
+    mask_exclude = mask_exclude | mask_temp_item
+
     # ホワイトリスト（許可）はブラックリスト（除外）よりも優先される（救済）
     if white_list:
         mask_white_item = item_str.str.contains("|".join(white_list).upper(), na=False, regex=True)
@@ -230,13 +249,22 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
                             payee_str.str.contains("|".join(white_list).upper(), na=False, regex=True)
         mask_exclude = mask_exclude & ~(mask_white_item | mask_white_vendor)
 
-    # 除外確定
+    # 除外確定（理由は後の判定ほど優先）
+    reason = pd.Series("", index=df.index)
+    reason[mask_ambiente_dummy] = "アンビエンテの仕入調整"
+    reason[mask_exclude_vendor] = "除外対象の取引先（運搬・運賃など）"
+    reason[mask_exclude_item] = "除外対象の品名（運搬料・手数料など）"
+    reason[mask_temp_item] = "臨時品目（商品コード9999）"
+    # 紙管(本) は正味重量欄に本数が入った伝票。重量は同じ搬入の「紙管N本」伝票で計上される
+    reason[mask_exclude & (item_str == "紙管(本)")] = "紙管の本数伝票（重量は別伝票で計上）"
+    df_excluded = df[mask_exclude].copy()
+    df_excluded["除外理由"] = reason[mask_exclude]
     df = df[~mask_exclude].copy()
 
     # --- 実重量の計算 (文字列からのカンマ削除・数値変換を安全に行う) ---
+    # 事務員は正味重量だけを集計している。調整重量が入るのは仕入調整伝票（正味0）のみで、これは計上しない
     raw_net_s = pd.to_numeric(df.get("正味重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-    raw_adj_s = pd.to_numeric(df.get("調整重量", pd.Series([0]*len(df))).astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-    df["実重量"] = raw_net_s + raw_adj_s
+    df["実重量"] = raw_net_s
 
     # --- 入出荷物理分離（Split-Pipeline Pattern） ---
     is_outbound_mask = df.apply(is_outbound_transaction, axis=1)
@@ -274,7 +302,6 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     # --- 入荷経路分類 ---
     def classify_route(row: Any) -> str:
         item_name = str(row.get("品名", ""))
-        inout = str(row.get("自社他社区分", ""))
         transaction_type = str(row.get("取引区分", ""))
 
         if "プレス" in item_name:
@@ -284,37 +311,21 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
             return "持込み"
             
         if "引取" in transaction_type:
-            if "自社" in inout:
-                return "自社回収"
-            if "他社" in inout:
-                return "他社回収"
+            # 事務員は運送店名で自社/他社を分けている（空欄・U-NET=自社トラック）。自社他社区分は使わない
+            carrier = row.get("運送店名")
+            carrier = carrier if isinstance(carrier, str) else ""
+            return "自社回収" if carrier == "" or "U-NET" in carrier.upper() else "他社回収"
                 
         return "持込み"
         
     df_inbound["経路分類"] = df_inbound.apply(classify_route, axis=1)
+    # 事務員の集計表に新聞の回収欄は無く、新聞の引取は「その他」に計上されている
+    newspaper_pickup = (df_inbound["大品目分類"] == "②新聞") & df_inbound["経路分類"].isin(["自社回収", "他社回収"])
+    df_inbound.loc[newspaper_pickup, "大品目分類"] = "⑤その他"
     df_outbound["経路分類"] = df_outbound.apply(classify_outbound_route, axis=1)
     
     # --- 不変データ射影（店舗リネージ保持と管理会社正規化） ---
     import re
-    def normalize_client_name(name: str) -> str:
-        if not name: return ""
-        name = name.translate(str.maketrans('Ａ-Ｚａ-ｚ０-９', 'A-Za-z0-9'))
-        name = re.sub(r'\(株\)|㈱|株式会社|\(有\)|㈲|有限会社|\(同\)|合同会社', '', name)
-        name = re.sub(r'[\s　]+', '', name)
-        return name
-
-    def map_supplier(sup: str, is_yokomochi: bool, category: str) -> str:
-        if is_yokomochi or not sup: return sup
-        if category == "⑤その他": return sup
-        norm_sup = normalize_client_name(sup)
-        if norm_sup in CLIENT_NAME_MAP:
-            return CLIENT_NAME_MAP[norm_sup]
-        # Fallback
-        for mc in MAJOR_CLIENTS:
-            if not mc: continue
-            if normalize_client_name(mc) in norm_sup or norm_sup in normalize_client_name(mc):
-                return mc
-        return sup
     
     df_inbound["store_name"] = df_inbound["仕入先名"].fillna("").astype(str).str.strip()
     df_inbound["payee_name"] = df_inbound["支払先名"].fillna("").astype(str).str.strip()
@@ -336,7 +347,7 @@ def transform_raw_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         if col in df_outbound.columns:
             df_outbound[col] = df_outbound[col].fillna("")
 
-    return df_inbound, df_outbound
+    return df_inbound, df_outbound, df_excluded
 
 
 MASTER_HIERARCHY: List[Any] = [
@@ -489,7 +500,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 if cat_id == '＜参考＞事業所間横持ち':
                     group_keys = ['仕入先名', '品名']
                 else:
-                    group_keys = ['normalized_parent', '仕入先名', '運送店名', '品名', '経路分類'] if 'normalized_parent' in route_df.columns else ['仕入先名', '運送店名', '品名', '経路分類']
+                    # AG-0006: 運送店名では行を分けない（自社/他社は経路分類で区別済み）
+                    group_keys = ['normalized_parent', '仕入先名', '品名', '経路分類'] if 'normalized_parent' in route_df.columns else ['仕入先名', '品名', '経路分類']
                 grouped = route_df.groupby(group_keys)
                 for keys, supp_df in sorted(grouped):
                     row_data: List[Any] = [None] * 20
@@ -504,17 +516,14 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                             row_data[4] = str(keys_tuple[1]).strip()
                         row_data[5] = ''
                     else:
-                        if len(group_keys) >= 4:
-                            parent_str = str(keys_tuple[0]).strip()
-                            client_str = str(keys_tuple[1]).strip()
-                            row_data[1] = '' if _normalize_for_compare(parent_str) == _normalize_for_compare(client_str) else parent_str
-                            row_data[2] = client_str
-                            row_data[3] = str(keys_tuple[2]).strip()
-                            row_data[4] = str(keys_tuple[3]).strip()
-                            if len(group_keys) >= 5:
-                                row_data[5] = str(keys_tuple[4]).strip()
-                        else:
-                            row_data[1] = str(keys_tuple[0]).strip()
+                        key = dict(zip(group_keys, keys_tuple))
+                        client_str = str(key['仕入先名']).strip()
+                        parent_str = str(key.get('normalized_parent', client_str)).strip()
+                        row_data[1] = '' if _normalize_for_compare(parent_str) == _normalize_for_compare(client_str) else parent_str
+                        row_data[2] = client_str
+                        row_data[3] = ''
+                        row_data[4] = str(key['品名']).strip()
+                        row_data[5] = str(key['経路分類']).strip()
                     ym_sums = supp_df.groupby('_ym')['実重量'].sum()
                     val_last_year = 0.0
                     val_this_month = 0.0
@@ -575,23 +584,21 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 grid.append([route_id, ''] + [None] * 18)
                 route_totals = [0.0] * 14
                 if not route_df.empty:
-                    group_keys = ['client_name', '得意先名', '運送店名', '品名', '取引区分'] if 'client_name' in route_df.columns else ['得意先名', '運送店名', '品名', '取引区分']
+                    # AG-0006: 運送店名では行を分けない
+                    group_keys = ['client_name', '得意先名', '品名', '取引区分'] if 'client_name' in route_df.columns else ['得意先名', '品名', '取引区分']
                     grouped = route_df.groupby(group_keys)
                     for keys, supp_df in sorted(grouped):
                         ship_row_data: List[Any] = [None] * 20
                         ship_row_data[0] = ''
                         keys_tuple = keys if isinstance(keys, tuple) else (keys,)
-                        if len(group_keys) >= 4:
-                            parent_str = str(keys_tuple[0]).strip()
-                            client_str = str(keys_tuple[1]).strip()
-                            ship_row_data[1] = '' if _normalize_for_compare(parent_str) == _normalize_for_compare(client_str) else parent_str
-                            ship_row_data[2] = client_str
-                            ship_row_data[3] = str(keys_tuple[2]).strip()
-                            ship_row_data[4] = str(keys_tuple[3]).strip()
-                            if len(group_keys) >= 5:
-                                ship_row_data[5] = str(keys_tuple[4]).strip()
-                        else:
-                            ship_row_data[1] = str(keys_tuple[0]).strip()
+                        key = dict(zip(group_keys, keys_tuple))
+                        client_str = str(key['得意先名']).strip()
+                        parent_str = str(key.get('client_name', client_str)).strip()
+                        ship_row_data[1] = '' if _normalize_for_compare(parent_str) == _normalize_for_compare(client_str) else parent_str
+                        ship_row_data[2] = client_str
+                        ship_row_data[3] = ''
+                        ship_row_data[4] = str(key['品名']).strip()
+                        ship_row_data[5] = str(key['取引区分']).strip()
                         ym_sums = supp_df.groupby('_ym')['実重量'].sum()
                         val_last_year = 0.0
                         val_this_month = 0.0
@@ -618,7 +625,7 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 grid.append(ship_subtotal)
                 for i in range(14):
                     cat_shipping_totals[i] += route_totals[i]
-            cat_subtotal: List[Any] = [None] * 20
+            cat_subtotal = [None] * 20
             cat_subtotal[0] = f'{cat_disp}出荷合計'
             cat_subtotal[1] = ''
             for i in range(13):
@@ -629,6 +636,14 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
             grid.append([None] * 20)
     return grid
 
+
+
+def _day_index(value: Any) -> Optional[int]:
+    """日次シート用: '_day' の値を 0 始まりの列位置に変換する。欠損・範囲外は None"""
+    if value is None or pd.isna(value):
+        return None
+    day = int(value)
+    return day - 1 if 1 <= day <= 31 else None
 
 
 def _filter_month(df: pd.DataFrame, year: int, month: int) -> pd.DataFrame:
@@ -674,7 +689,7 @@ def build_micro_report(
             return str(s).strip().replace('㈲', '(有)').replace('㈱', '(株)')
         df_in['管理会社'] = df_in.apply(lambda r: '' if normalize_for_compare(r.get('normalized_parent','')) == normalize_for_compare(r.get('仕入先名','')) else str(r.get('normalized_parent','')).strip(), axis=1)
         df_in['客先名称'] = df_in.get('仕入先名', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
-        df_in['運送業者'] = df_in.get('運送店名', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
+        df_in['運送業者'] = ''  # AG-0006: 運送店名では行を分けない（自社/他社は区分で区別済み）
         df_in['品名'] = df_in.get('品名', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
         df_in['区分'] = df_in.get('経路分類', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
 
@@ -692,9 +707,9 @@ def build_micro_report(
                     kanri, kyakusaki, unso, hinmei, kubun = keys
                     days_val = [0] * 31
                     for _, r in df_g.iterrows():
-                        d = r.get('_day')
-                        if pd.notna(d) and 1 <= d <= 31:
-                            days_val[int(d)-1] += r.get('実重量', 0)
+                        d = _day_index(r.get('_day'))
+                        if d is not None:
+                            days_val[d] += r.get('実重量', 0)
                     total = sum(days_val)
                     if total > 0:
                         row = [kanri, kyakusaki, unso, hinmei, kubun] + [format_num(v) for v in days_val] + [format_num(total)]
@@ -702,18 +717,18 @@ def build_micro_report(
                 
                 days_sub = [0] * 31
                 for _, r in df_keiro.iterrows():
-                    d = r.get('_day')
-                    if pd.notna(d) and 1 <= d <= 31:
-                        days_sub[int(d)-1] += r.get('実重量', 0)
+                    d = _day_index(r.get('_day'))
+                    if d is not None:
+                        days_sub[d] += r.get('実重量', 0)
                 sub_total = sum(days_sub)
                 grid.append(['', f"{keiro}合計", '', '', ''] + [format_num(v) for v in days_sub] + [format_num(sub_total)])
             
             days_dai = [0] * 31
             for _, r in df_dai.iterrows():
-                d = r.get('_day')
-                if pd.notna(d) and 1 <= d <= 31:
-                    days_dai[int(d)-1] += r.get('実重量', 0)
-                    grand_total_days[int(d)-1] += r.get('実重量', 0)
+                d = _day_index(r.get('_day'))
+                if d is not None:
+                    days_dai[d] += r.get('実重量', 0)
+                    grand_total_days[d] += r.get('実重量', 0)
             dai_total = sum(days_dai)
             grid.append(['', f"{daimoku} 合計", '', '', ''] + [format_num(v) for v in days_dai] + [format_num(dai_total)])
             grid.append([''] * 37)
@@ -744,9 +759,9 @@ def build_micro_report(
                     kanri, kyakusaki, unso, hinmei, kubun = keys
                     days_val = [0] * 31
                     for _, r in df_g.iterrows():
-                        d = r.get('_day')
-                        if pd.notna(d) and 1 <= d <= 31:
-                            days_val[int(d)-1] += r.get('実重量', 0)
+                        d = _day_index(r.get('_day'))
+                        if d is not None:
+                            days_val[d] += r.get('実重量', 0)
                     total = sum(days_val)
                     if total > 0:
                         row = [kanri, kyakusaki, unso, hinmei, kubun] + [format_num(v) for v in days_val] + [format_num(total)]
@@ -754,18 +769,18 @@ def build_micro_report(
                 
                 days_sub = [0] * 31
                 for _, r in df_keiro.iterrows():
-                    d = r.get('_day')
-                    if pd.notna(d) and 1 <= d <= 31:
-                        days_sub[int(d)-1] += r.get('実重量', 0)
+                    d = _day_index(r.get('_day'))
+                    if d is not None:
+                        days_sub[d] += r.get('実重量', 0)
                 sub_total = sum(days_sub)
                 grid.append(['', f"{keiro}合計", '', '', ''] + [format_num(v) for v in days_sub] + [format_num(sub_total)])
             
             days_dai = [0] * 31
             for _, r in df_dai.iterrows():
-                d = r.get('_day')
-                if pd.notna(d) and 1 <= d <= 31:
-                    days_dai[int(d)-1] += r.get('実重量', 0)
-                    grand_total_days[int(d)-1] += r.get('実重量', 0)
+                d = _day_index(r.get('_day'))
+                if d is not None:
+                    days_dai[d] += r.get('実重量', 0)
+                    grand_total_days[d] += r.get('実重量', 0)
             dai_total = sum(days_dai)
             grid.append(['', f"{daimoku} 合計", '', '', ''] + [format_num(v) for v in days_dai] + [format_num(dai_total)])
             grid.append([''] * 37)
@@ -774,6 +789,33 @@ def build_micro_report(
         grid.append(['', "出荷総合計", '', '', ''] + [format_num(v) for v in grand_total_days] + [format_num(grand_total)])
 
     return grid
+
+def build_excluded_report(df_excluded: pd.DataFrame, target_year: int, target_month: int) -> List[List[Any]]:
+    """除外した伝票のうち対象月の分を、確認用の一覧（日付順）にする"""
+    headers = ["日付", "取引先", "品名", "商品コード", "正味重量", "除外理由", "入出荷"]
+    if df_excluded.empty:
+        return [[f"除外した伝票（{target_year}年{target_month}月）: 0件"], headers]
+    df = _filter_month(df_excluded, target_year, target_month).sort_values("_date", kind="stable")
+    rows: List[List[Any]] = []
+    for _, r in df.iterrows():
+        outbound = bool(is_outbound_transaction(r))
+        partner = r.get("得意先名") if outbound else r.get("仕入先名")
+        code = pd.to_numeric(str(r.get("商品コード", "")), errors="coerce")
+        weight = pd.to_numeric(str(r.get("正味重量", "")).replace(",", ""), errors="coerce")
+        weight = 0.0 if pd.isna(weight) else float(weight)
+        rows.append([
+            r["_date"].strftime("%Y-%m-%d"),
+            "" if pd.isna(partner) else str(partner),
+            str(r.get("品名", "")),
+            "" if pd.isna(code) else str(int(code)),
+            f"{int(weight):,}",
+            str(r.get("除外理由", "")),
+            "出荷" if outbound else "入荷",
+        ])
+    total = sum(float(row[4].replace(",", "")) for row in rows)
+    title = f"除外した伝票（{target_year}年{target_month}月）: {len(rows)}件 合計 {total:,.0f}kg ／ 計上すべき伝票があれば判断してください"
+    return [[title], headers] + rows
+
 
 def generate_warnings(df: pd.DataFrame) -> str:
     unknown_items = []
@@ -818,3 +860,6 @@ def generate_warnings(df: pd.DataFrame) -> str:
         lines.append(f"- {row['品名']} ({row['count']}件, {row['weight']:,.0f}kg)")
         
     return "\n".join(lines)
+
+
+
