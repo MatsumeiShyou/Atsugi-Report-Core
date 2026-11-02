@@ -6,6 +6,7 @@ import datetime
 
 # --- 主要取引先リスト ---
 from mapping_definitions import ITEM_CATEGORY_MAP, CLIENT_ITEM_CATEGORY_OVERRIDES
+from forecast import Forecast, DISPLAY_CATEGORIES, OWN_CATEGORIES, FORECAST_CATEGORIES
 # ---------------------------------------------------
 
 logger = logging.getLogger(__name__)
@@ -718,7 +719,9 @@ def build_micro_report(
     df_outbound: Optional[pd.DataFrame] = None,
     target_year: Optional[int] = None,
     target_month: Optional[int] = None,
-    weather_row: Optional[List[str]] = None
+    weather_row: Optional[List[str]] = None,
+    forecast: Optional[Forecast] = None,
+    forecast_cells: Optional[List[Tuple[int, int]]] = None
 ) -> List[List[Any]]:
     if target_year is None or target_month is None:
         target_year, target_month = 2026, 8
@@ -739,15 +742,31 @@ def build_micro_report(
         return f"{int(val):,}"
 
     def days_cells(days: List[Any]) -> List[str]:
-        """1日〜31日の値、月合計、1〜15日累計の順に並べる（AG-0013）"""
-        return [format_num(v) for v in days] + [format_num(sum(days)), format_num(sum(days[:15]))]
+        """1日〜31日の値、月合計、1〜15日累計、月末見込（予測のある行だけ）の順に並べる（AG-0013, AG-0015）"""
+        return [format_num(v) for v in days] + [format_num(sum(days)), format_num(sum(days[:15])), ""]
+
+    month_forecast = forecast if forecast and (forecast.start.year, forecast.start.month) == (target_year, target_month) else None
+
+    def add_total_row(label: str, days: List[Any], predicted: Dict[int, float]) -> None:
+        """合計行を足す。予測のある日は予測を入れて赤字の対象にする。合計・1〜15日累計は実績のまま、月末見込は実績＋予測"""
+        cells = days_cells(days)
+        for idx, kg in predicted.items():
+            cells[idx] = format_num(kg)
+        if predicted:
+            cells[33] = format_num(sum(days[:min(predicted)]) + sum(predicted.values()))
+        grid.append(['', label, '', '', ''] + cells)
+        if forecast_cells is not None:
+            forecast_cells.extend((len(grid) - 1, 5 + idx) for idx in predicted)
+
+    def predicted_for(categories: List[str]) -> Dict[int, float]:
+        return month_forecast.total(categories) if month_forecast else {}
 
     grid: List[List[Any]] = []
-    headers = ["管理会社", "客先名称", "運送業者", "品名", "区分"] + [f"{i}日" for i in range(1, 32)] + ["合計", "1〜15日累計"]
+    headers = ["管理会社", "客先名称", "運送業者", "品名", "区分"] + [f"{i}日" for i in range(1, 32)] + ["合計", "1〜15日累計", "月末見込（予測含む）"]
     grid.append(headers)
     if weather_row:
         # 天気（1日〜31日）。外部通信は呼び出し側（weather.py）で行い、ここでは並べるだけ
-        grid.append(['', '天気', '', '', ''] + list(weather_row) + ['', ''])
+        grid.append(['', '天気', '', '', ''] + list(weather_row) + ['', '', ''])
 
     if not df_in.empty:
         def normalize_for_compare(s: str) -> str:
@@ -774,7 +793,7 @@ def build_micro_report(
                 if keiro_name == PRESS_ROUTE and has_bulk:
                     # プレス品の区画の前に、バラ（持込み＋回収）の合計を出す。プレス品が無い品目には出さない
                     grid.append(['', "バラ合計", '', '', ''] + days_cells(bulk_days))
-                grid.append([f"{daimoku}-{keiro_label}"] + [""] * 37)
+                grid.append([f"{daimoku}-{keiro_label}"] + [""] * 38)
                 df_gyousya = df_keiro.groupby(['管理会社', '客先名称', '運送業者', '品名', '区分'])
                 for keys, df_g in df_gyousya:
                     kanri, kyakusaki, unso, hinmei, kubun = keys
@@ -806,8 +825,8 @@ def build_micro_report(
                     days_dai[d] += r.get('実重量', 0)
                     grand_total_days[d] += r.get('実重量', 0)
             dai_total = sum(days_dai)
-            grid.append(['', f"{daimoku} 合計", '', '', ''] + days_cells(days_dai))
-            grid.append([''] * 38)
+            add_total_row(f"{daimoku} 合計", days_dai, predicted_for([daimoku]) if daimoku in DISPLAY_CATEGORIES else {})
+            grid.append([''] * 39)
         
         # 事業所の入荷合計は横持ちを除く（事務員の表の「入荷合計（横持除く）」）。横持ちを含む総量も併記する（AG-0012）
         yokomochi_days = [0] * 31
@@ -816,11 +835,11 @@ def build_micro_report(
             if d is not None:
                 yokomochi_days[d] += r.get('実重量', 0)
         own_days = [a - b for a, b in zip(grand_total_days, yokomochi_days)]
-        grid.append(['', "入荷合計（横持除く）", '', '', ''] + days_cells(own_days))
-        grid.append(['', "入荷総合計（横持含む）", '', '', ''] + days_cells(grand_total_days))
-        grid.append([''] * 38)
+        add_total_row("入荷合計（横持除く）", own_days, predicted_for(OWN_CATEGORIES))
+        add_total_row("入荷総合計（横持含む）", grand_total_days, predicted_for(FORECAST_CATEGORIES))
+        grid.append([''] * 39)
 
-    grid.append(["＜出荷＞"] + [""] * 37)
+    grid.append(["＜出荷＞"] + [""] * 38)
     if not df_out.empty:
         df_out['管理会社'] = ''
         df_out['客先名称'] = df_out.get('client_name', pd.Series(['']*len(df_out))).fillna('').astype(str).str.strip()
@@ -836,7 +855,7 @@ def build_micro_report(
             if daimoku not in daimoku_groups: continue
             df_dai = daimoku_groups[daimoku]
             for keiro, df_keiro in df_dai.groupby('経路分類'):
-                grid.append([f"{daimoku}-{keiro}"] + [""] * 37)
+                grid.append([f"{daimoku}-{keiro}"] + [""] * 38)
                 df_gyousya = df_keiro.groupby(['管理会社', '客先名称', '運送業者', '品名', '区分'])
                 for keys, df_g in df_gyousya:
                     kanri, kyakusaki, unso, hinmei, kubun = keys
@@ -866,7 +885,7 @@ def build_micro_report(
                     grand_total_days[d] += r.get('実重量', 0)
             dai_total = sum(days_dai)
             grid.append(['', f"{daimoku} 合計", '', '', ''] + days_cells(days_dai))
-            grid.append([''] * 38)
+            grid.append([''] * 39)
         
         grand_total = sum(grand_total_days)
         grid.append(['', "出荷総合計", '', '', ''] + days_cells(grand_total_days))

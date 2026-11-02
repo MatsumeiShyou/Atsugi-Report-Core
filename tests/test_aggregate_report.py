@@ -245,8 +245,9 @@ def test_micro_report_has_first_half_month_cumulative_column() -> None:
     df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
     micro = build_micro_report(df_in, df_out, target_year=2026, target_month=8)
 
-    assert micro[0][-2:] == ["合計", "1〜15日累計"]
-    assert {len(r) for r in micro} == {38}, "見出し・空行を含め、全行の列数が揃っている"
+    assert micro[0][-3:] == ["合計", "1〜15日累計", "月末見込（予測含む）"]
+    assert {len(r) for r in micro} == {39}, "見出し・空行を含め、全行の列数が揃っている"
+    assert all(r[38] == "" for r in micro[1:]), "予測を渡さなければ月末見込は空欄"
     by_label = {r[1]: r for r in micro if r[0] == "" and r[1]}
     by_client = {r[1]: r for r in micro if r[1] in ("客先A", "客先B")}
     # 客先A: 5日1,000 + 15日200 + 16日300。累計は15日まで
@@ -268,8 +269,8 @@ def test_micro_report_has_weather_row_under_header() -> None:
     weather = ["晴", "雨", "雪"] + [""] * 27 + ["曇"]
 
     micro = build_micro_report(df_in, df_out, target_year=2026, target_month=8, weather_row=weather)
-    assert micro[1] == ["", "天気", "", "", ""] + weather + ["", ""]
-    assert {len(r) for r in micro} == {38}
+    assert micro[1] == ["", "天気", "", "", ""] + weather + ["", "", ""]
+    assert {len(r) for r in micro} == {39}
 
     without = build_micro_report(df_in, df_out, target_year=2026, target_month=8)
     assert all(r[1] != "天気" for r in without), "天気を渡さなければ行を足さない"
@@ -294,3 +295,82 @@ def test_macro_report_blanks_year_over_year_for_unfinished_month() -> None:
     row = next(r for r in finished if r[2] == "客先A")
     assert row[19] == "-4,000"
     assert next(r[19] for r in finished if r[0] == "入荷合計（横持除く）") == "-4,000"
+
+
+def _forecast_reports(with_forecast: bool = True) -> tuple:
+    """2026/11/01-02 の実績（段ボール・プラ類・横持ち）と、3日以降の予測から日次シートを作る"""
+    import datetime
+    from aggregate_report import prepare_raw_data
+    from forecast import Forecast
+    base = {"調整重量": 0, "運送店名": None, "取引区分": "持込"}
+    data = [
+        {**base, "年月日": "2026/11/01", "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 1000},
+        {**base, "年月日": "2026/11/02", "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 2000},
+        {**base, "年月日": "2026/11/02", "仕入先名": "客先B", "品名": "ビニール", "正味重量": 30},
+        {**base, "年月日": "2026/11/02", "仕入先名": "(横持)本社事業所", "品名": "段ボールバラ", "正味重量": 400},
+    ]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+    fc = Forecast(start=datetime.date(2026, 11, 3), daily={
+        "①段ボール": {2: 1500.0, 3: 1600.0}, "②新聞": {2: 100.0, 3: 100.0}, "③雑誌": {2: 200.0, 3: 200.0},
+        "④プラ類": {2: 10.0, 3: 10.0}, "⑤その他": {2: 300.0, 3: 300.0}, "＜参考＞事業所間横持ち": {2: 50.0, 3: 50.0},
+    })
+    cells: list = []
+    micro = build_micro_report(df_in, df_out, target_year=2026, target_month=11,
+                               forecast=fc if with_forecast else None, forecast_cells=cells)
+    return micro, cells
+
+
+def test_micro_report_shows_forecast_in_category_and_total_rows() -> None:
+    """日次シート: 品目合計と入荷合計の行に、予測を入れる日の値と月末見込を出す。合計は実績のまま（AG-0015）"""
+    micro, cells = _forecast_reports()
+    assert {len(r) for r in micro} == {39}
+    rows = {r[1]: r for r in micro if r[0] == "" and r[1] and len(r) > 38}
+    dan = rows["①段ボール 合計"]
+    assert (dan[5], dan[6]) == ("1,000", "2,000")                       # 1日・2日は実績
+    assert (dan[7], dan[8], dan[9]) == ("1,500", "1,600", "")           # 3日・4日は予測、5日以降は予測なし（テストの都合）
+    assert dan[36] == "3,000" and dan[37] == "3,000"                    # 合計と1〜15日累計は実績だけ
+    assert dan[38] == "6,100"                                           # 月末見込 = 実績3,000 + 予測3,100
+    # 入荷合計(横持除く): 実績3,030(段ボール3,000+プラ類30) + 予測4,320(3日2,110+4日2,210。プラ類の予測も含む)
+    assert rows["入荷合計（横持除く）"][38] == "7,350"
+    assert (rows["入荷合計（横持除く）"][7], rows["入荷合計（横持除く）"][8]) == ("2,110", "2,210")
+    # 入荷総合計(横持含む): 上に横持ちの実績400と予測100を足す
+    assert rows["入荷総合計（横持含む）"][38] == "7,850"
+
+
+def test_micro_report_does_not_show_forecast_for_plastic_yokomochi_or_detail_rows() -> None:
+    micro, cells = _forecast_reports()
+    rows = {r[1]: r for r in micro if r[0] == "" and r[1] and len(r) > 38}
+    assert rows["④プラ類 合計"][7] == "" and rows["④プラ類 合計"][38] == ""
+    assert rows["＜参考＞事業所間横持ち 合計"][7] == "" and rows["＜参考＞事業所間横持ち 合計"][38] == ""
+    detail = next(r for r in micro if len(r) > 38 and r[1] == "客先A")
+    assert detail[7] == "" and detail[38] == "", "取引先の明細行には予測を出さない"
+
+
+def test_micro_report_forecast_cells_point_at_forecast_values_only() -> None:
+    micro, cells = _forecast_reports()
+    assert cells, "赤字にするセルが記録される"
+    for row, col in cells:
+        assert col >= 5 + 2, "予測は実績のある1日・2日の列には入らない"
+        assert micro[row][col] != "", f"赤字のセルに値がある: {(row, col)}"
+    # 実績のある品目の行（この例では段ボールのみ。新聞・雑誌・その他は実績が無く行そのものが無い）と、入荷合計の2行
+    assert {micro[row][1] for row, _ in cells} == {"①段ボール 合計", "入荷合計（横持除く）", "入荷総合計（横持含む）"}
+    assert len(cells) == 6
+
+
+def test_micro_report_without_forecast_leaves_outlook_blank_and_records_nothing() -> None:
+    micro, cells = _forecast_reports(with_forecast=False)
+    assert cells == []
+    assert all(r[38] == "" for r in micro[1:])
+
+
+def test_micro_report_ignores_forecast_for_another_month() -> None:
+    import datetime
+    from aggregate_report import prepare_raw_data
+    from forecast import Forecast
+    data = [{"年月日": "2026/11/02", "調整重量": 0, "運送店名": None, "取引区分": "持込",
+             "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 1000}]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+    other = Forecast(start=datetime.date(2026, 12, 3), daily={"①段ボール": {2: 1.0}})
+    cells: list = []
+    micro = build_micro_report(df_in, df_out, target_year=2026, target_month=11, forecast=other, forecast_cells=cells)
+    assert cells == [] and all(r[38] == "" for r in micro[1:])

@@ -1,11 +1,13 @@
 import os
 import sys
 import logging
+from typing import List, Tuple
 import pandas as pd
 from dotenv import load_dotenv
 
 from google_api import fetch_csv_from_drive, write_to_sheets
 from weather import build_weather_row, ATTRIBUTION
+from forecast import build_forecast, NOTE as FORECAST_NOTE
 from aggregate_report import prepare_raw_data, transform_with_excluded, build_macro_report, build_micro_report, build_excluded_report, generate_warnings, purge_zero_sum_groups
 
 load_dotenv()
@@ -81,7 +83,11 @@ def main() -> None:
         
         macro_grid = build_macro_report(df_macro_in, df_macro_out, target_year=target_year, target_month=target_month)
         weather_row = build_weather_row(target_year, target_month)
-        micro_grid = build_micro_report(df_micro_in, df_micro_out, target_year=target_year, target_month=target_month, weather_row=weather_row)
+        # 予測は13週分の履歴が要るので、対象月だけに絞る前の13か月分の入荷から作る（AG-0015）
+        forecast = build_forecast(df_macro_in, target_year, target_month)
+        forecast_cells: List[Tuple[int, int]] = []
+        micro_grid = build_micro_report(df_micro_in, df_micro_out, target_year=target_year, target_month=target_month,
+                                        weather_row=weather_row, forecast=forecast, forecast_cells=forecast_cells)
 
         warning_text = generate_warnings(df_inbound, target_year=target_year, target_month=target_month)
         if warning_text:
@@ -89,6 +95,8 @@ def main() -> None:
         if any(weather_row):
             # 気象庁の利用規約に従い、出典と加工の旨をシートに書く（天気が1日も入らなかった場合は書かない）
             warning_text = "\n".join(filter(None, [warning_text, ATTRIBUTION]))
+        if forecast:
+            warning_text = "\n".join(filter(None, [warning_text, FORECAST_NOTE]))
 
         macro_df = pd.DataFrame(macro_grid)
         micro_df = pd.DataFrame(micro_grid)
@@ -96,7 +104,7 @@ def main() -> None:
         # [L] Load to Sheets
         logger.info("整形済みデータをスプレッドシートへ出力します...")
         write_to_sheets(macro_df, sheet_name=sheet_name_macro, start_col=1)
-        write_to_sheets(micro_df, sheet_name=sheet_name_micro, start_col=1, warning_text=warning_text)
+        write_to_sheets(micro_df, sheet_name=sheet_name_micro, start_col=1, warning_text=warning_text, red_cells=forecast_cells)
         # 除外した伝票は黙って捨てず、確認用の一覧に出す（AG-0005）
         excluded_df = pd.DataFrame(build_excluded_report(df_excluded, target_year=target_year, target_month=target_month))
         write_to_sheets(excluded_df, sheet_name=f"{sheet_name_micro}除外", start_col=1)

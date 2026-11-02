@@ -2,7 +2,7 @@ import os
 import time
 import random
 import logging
-from typing import Any, Dict, List, Callable
+from typing import Any, Dict, List, Callable, Optional, Tuple
 from functools import wraps
 from datetime import datetime
 from dateutil.relativedelta import relativedelta # type: ignore
@@ -143,9 +143,42 @@ def fetch_csv_from_drive() -> List[pd.DataFrame]:
             
     return dataframes
 
+RED = {"red": 1.0, "green": 0.0, "blue": 0.0}
+_COLOR_FIELD = "userEnteredFormat.textFormat.foregroundColor"
+
+
+def build_color_requests(sheet_id: int, n_rows: int, n_cols: int, red_cells: List[Tuple[int, int]],
+                         row_offset: int = 0, col_offset: int = 0) -> List[Dict[str, Any]]:
+    """文字色の指示を作る（AG-0015）。値を消しても書式は残るため、書き込んだ範囲の文字色をまず既定に戻し、
+    そのあと red_cells（表の中の(行, 列)、0始まり）だけを赤字にする。同じ行で隣り合う列は1つにまとめる。
+    row_offset・col_offset は、表がシートの何行目・何列目から始まるか（表の上に注記を書いた行数など）"""
+    requests: List[Dict[str, Any]] = [{"repeatCell": {
+        "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": row_offset + n_rows,
+                  "startColumnIndex": 0, "endColumnIndex": col_offset + n_cols},
+        "cell": {}, "fields": _COLOR_FIELD}}]
+    by_row: Dict[int, List[int]] = {}
+    for row, col in red_cells:
+        by_row.setdefault(row, []).append(col)
+    for row in sorted(by_row):
+        runs: List[List[int]] = []
+        for col in sorted(set(by_row[row])):
+            if runs and col == runs[-1][1] + 1:
+                runs[-1][1] = col
+            else:
+                runs.append([col, col])
+        for first, last in runs:
+            requests.append({"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": row_offset + row, "endRowIndex": row_offset + row + 1,
+                          "startColumnIndex": col_offset + first, "endColumnIndex": col_offset + last + 1},
+                "cell": {"userEnteredFormat": {"textFormat": {"foregroundColor": RED}}}, "fields": _COLOR_FIELD}})
+    return requests
+
+
 @exponential_backoff_with_jitter(max_retries=3)
-def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1, warning_text: str = "") -> None:
-    """集計済みDataFrameをスプレッドシートに部分書き込み（非破壊）する"""
+def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1, warning_text: str = "",
+                    red_cells: Optional[List[Tuple[int, int]]] = None) -> None:
+    """集計済みDataFrameをスプレッドシートに部分書き込み（非破壊）する。
+    red_cells を渡すと（空でも）、書き込んだ範囲の文字色を戻してから、その(行, 列)（dfの中の位置、0始まり）を赤字にする"""
     spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
     if not spreadsheet_id:
         raise ValueError("環境変数 TARGET_SPREADSHEET_ID が設定されていません。")
@@ -169,11 +202,13 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1, warni
     # データを gspread.Cell に変換 (Noneは除外)
     cells = []
     grid = df.values.tolist()
+    row_offset = 0
     if warning_text:
         warning_lines = warning_text.split('\n')
         grid.insert(0, [])
         for line in reversed(warning_lines):
             grid.insert(0, [line])
+        row_offset = len(warning_lines) + 1
     for r_idx, row in enumerate(grid):
         for c_idx, val in enumerate(row):
             if pd.notna(val) and val is not None:
@@ -184,5 +219,9 @@ def write_to_sheets(df: pd.DataFrame, sheet_name: str, start_col: int = 1, warni
         logger.info(f"シート '{sheet_name}' に {len(cells)} セルを部分書き込みします...")
         wks.update_cells(cells, value_input_option=ValueInputOption.user_entered)
         logger.info("書き込みが完了しました。")
+        if red_cells is not None:
+            sh.batch_update({"requests": build_color_requests(wks.id, df.shape[0], df.shape[1], red_cells,
+                                                              row_offset=row_offset, col_offset=start_col - 1)})
+            logger.info(f"予測のセル {len(red_cells)} 個を赤字にしました。")
     else:
         logger.info(f"シート '{sheet_name}' に書き込むデータがありませんでした。")
