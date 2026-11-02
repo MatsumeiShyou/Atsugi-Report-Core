@@ -308,9 +308,6 @@ def transform_with_excluded(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
         return "持込み"
         
     df_inbound["経路分類"] = df_inbound.apply(classify_route, axis=1)
-    # 事務員の集計表に新聞の回収欄は無く、新聞の引取は「その他」に計上されている
-    newspaper_pickup = (df_inbound["大品目分類"] == "②新聞") & df_inbound["経路分類"].isin(["自社回収", "他社回収"])
-    df_inbound.loc[newspaper_pickup, "大品目分類"] = "⑤その他"
     df_outbound["経路分類"] = df_outbound.apply(classify_outbound_route, axis=1)
     
     # --- 不変データ射影（店舗リネージ保持と管理会社正規化） ---

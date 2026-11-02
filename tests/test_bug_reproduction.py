@@ -96,14 +96,27 @@ def test_cloth_items_are_other_category():
     assert df.loc["客先B", "大品目分類"] == "⑤その他"
 
 
-def test_newspaper_pickup_is_other_category():
-    """新聞の引取は「その他」へ（集計表に新聞の回収欄が無い）。持込は「新聞」のまま"""
+def test_newspaper_is_newspaper_category_for_pickup_and_delivery():
+    """新聞は引取でも持込でも「②新聞」。「その他」に入れない（人間の指示 2026-11-02）"""
     df = _inbound([
         {"仕入先名": "客先A", "品名": "新聞バラ", "取引区分": "引取"},
         {"仕入先名": "客先B", "品名": "新聞バラ", "取引区分": "持込"},
     ])
-    assert df.loc["客先A", "大品目分類"] == "⑤その他"
+    assert df.loc["客先A", "大品目分類"] == "②新聞"
+    assert df.loc["客先A", "経路分類"] == "自社回収"
     assert df.loc["客先B", "大品目分類"] == "②新聞"
+
+
+def test_newspaper_pickup_is_not_reported_as_unregistered():
+    """登録済みの新聞バラは、引取でも「未登録の品名」の警告に出さない"""
+    from aggregate_report import generate_warnings
+    df = _inbound([
+        {"仕入先名": "客先A", "品名": "新聞バラ", "取引区分": "引取"},
+        {"仕入先名": "客先B", "品名": "存在しない品名XYZ", "取引区分": "持込"},
+    ])
+    warning = generate_warnings(df.reset_index())
+    assert "存在しない品名XYZ" in warning
+    assert "新聞バラ" not in warning
 
 
 def test_purchase_adjustment_slip_adds_no_weight():
