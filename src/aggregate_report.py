@@ -708,7 +708,8 @@ def build_micro_report(
     df_inbound: pd.DataFrame,
     df_outbound: Optional[pd.DataFrame] = None,
     target_year: Optional[int] = None,
-    target_month: Optional[int] = None
+    target_month: Optional[int] = None,
+    weather_row: Optional[List[str]] = None
 ) -> List[List[Any]]:
     if target_year is None or target_month is None:
         target_year, target_month = 2026, 8
@@ -735,6 +736,9 @@ def build_micro_report(
     grid: List[List[Any]] = []
     headers = ["管理会社", "客先名称", "運送業者", "品名", "区分"] + [f"{i}日" for i in range(1, 32)] + ["合計", "1〜15日累計"]
     grid.append(headers)
+    if weather_row:
+        # 天気（1日〜31日）。外部通信は呼び出し側（weather.py）で行い、ここでは並べるだけ
+        grid.append(['', '天気', '', '', ''] + list(weather_row) + ['', ''])
 
     if not df_in.empty:
         def normalize_for_compare(s: str) -> str:

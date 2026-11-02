@@ -5,6 +5,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from google_api import fetch_csv_from_drive, write_to_sheets
+from weather import build_weather_row, ATTRIBUTION
 from aggregate_report import prepare_raw_data, transform_with_excluded, build_macro_report, build_micro_report, build_excluded_report, generate_warnings, purge_zero_sum_groups
 
 load_dotenv()
@@ -79,11 +80,15 @@ def main() -> None:
 
         
         macro_grid = build_macro_report(df_macro_in, df_macro_out, target_year=target_year, target_month=target_month)
-        micro_grid = build_micro_report(df_micro_in, df_micro_out, target_year=target_year, target_month=target_month)
+        weather_row = build_weather_row(target_year, target_month)
+        micro_grid = build_micro_report(df_micro_in, df_micro_out, target_year=target_year, target_month=target_month, weather_row=weather_row)
 
         warning_text = generate_warnings(df_inbound, target_year=target_year, target_month=target_month)
         if warning_text:
             logger.info(warning_text)
+        if any(weather_row):
+            # 気象庁の利用規約に従い、出典と加工の旨をシートに書く（天気が1日も入らなかった場合は書かない）
+            warning_text = "\n".join(filter(None, [warning_text, ATTRIBUTION]))
 
         macro_df = pd.DataFrame(macro_grid)
         micro_df = pd.DataFrame(micro_grid)

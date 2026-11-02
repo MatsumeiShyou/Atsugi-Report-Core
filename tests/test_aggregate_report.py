@@ -257,3 +257,19 @@ def test_micro_report_has_first_half_month_cumulative_column() -> None:
     assert by_label["入荷合計（横持除く）"][37] == "1,200"
     assert by_label["入荷総合計（横持含む）"][37] == "1,200"
     assert (by_label["出荷総合計"][36], by_label["出荷総合計"][37]) == ("800", "700")
+
+
+def test_micro_report_has_weather_row_under_header() -> None:
+    """日次シート: 見出し行の直下に天気の行（1日〜31日）を並べる。列数は他の行と同じ（AG-0014）"""
+    from aggregate_report import prepare_raw_data
+    data = [{"年月日": "2026/08/03", "調整重量": 0, "運送店名": None, "取引区分": "持込",
+             "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 1000}]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+    weather = ["晴", "雨", "雪"] + [""] * 27 + ["曇"]
+
+    micro = build_micro_report(df_in, df_out, target_year=2026, target_month=8, weather_row=weather)
+    assert micro[1] == ["", "天気", "", "", ""] + weather + ["", ""]
+    assert {len(r) for r in micro} == {38}
+
+    without = build_micro_report(df_in, df_out, target_year=2026, target_month=8)
+    assert all(r[1] != "天気" for r in without), "天気を渡さなければ行を足さない"
