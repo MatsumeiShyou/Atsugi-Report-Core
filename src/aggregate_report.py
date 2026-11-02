@@ -437,6 +437,20 @@ def format_num(val: float) -> str:
 def _normalize_for_compare(s: str) -> str:
     return str(s).strip().replace('㈱', '(株)').replace('㈲', '(有)')
 
+
+# 入荷の経路分類の表示順（持込み → 回収 → プレス品）と、バラ／プレス品の区別（AG-0011）
+PRESS_ROUTE = "プレス品"
+_ROUTE_ORDER = ["持込み", "自社回収", "他社回収", PRESS_ROUTE]
+
+
+def _route_display(route: str) -> str:
+    """入荷の経路分類の表示名。プレス品と区別できるよう、それ以外には「バラ・」を付ける"""
+    return route if route == PRESS_ROUTE else f"バラ・{route}"
+
+
+def _route_sort_key(route: str) -> Tuple[int, str]:
+    return (_ROUTE_ORDER.index(route) if route in _ROUTE_ORDER else len(_ROUTE_ORDER), route)
+
 def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFrame]=None, target_year: Optional[int]=None, target_month: Optional[int]=None) -> List[List[Any]]:
     grid: List[List[Any]] = []
     df_in = df_inbound.copy()
@@ -471,15 +485,28 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
         cat_disp = cat_info.get('cat_disp', cat_id)
         grid.append([cat_id] + [None] * 19)
         cat_totals = [0.0] * 14
+        bulk_totals = [0.0] * 14
+        bulk_has_rows = False
         for route_info in cat_info['routes']:
             route_id = route_info['route_id']
             route_match_list = route_info['route_match']
+            is_press_route = route_match_list == [PRESS_ROUTE]
             if cat_id == '＜参考＞事業所間横持ち':
                 route_df = df_in[df_in['横持フラグ'] == True].copy()
             else:
                 route_df = df_in[(df_in['大品目分類'] == cat_id) & df_in['経路分類'].isin(route_match_list) & (df_in['横持フラグ'] == False)].copy()
             if route_df.empty:
                 continue
+            if is_press_route and bulk_has_rows:
+                # プレス品の区画の前に、バラ（持込み＋回収）の合計を出す。プレス品が無い品目には出さない
+                bulk_subtotal: List[Any] = [None] * 20
+                bulk_subtotal[0] = 'バラ合計'
+                bulk_subtotal[1] = ''
+                for i in range(13):
+                    if bulk_totals[i] != 0:
+                        bulk_subtotal[i + 6] = format_num(bulk_totals[i])
+                bulk_subtotal[19] = format_num(bulk_totals[13])
+                grid.append(bulk_subtotal)
             grid.append([route_id, ''] + [None] * 18)
             route_totals = [0.0] * 14
             if not route_df.empty:
@@ -509,7 +536,7 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                         row_data[2] = client_str
                         row_data[3] = ''
                         row_data[4] = str(key['品名']).strip()
-                        row_data[5] = str(key['経路分類']).strip()
+                        row_data[5] = _route_display(str(key['経路分類']).strip())
                     ym_sums = supp_df.groupby('_ym')['実重量'].sum()
                     val_last_year = 0.0
                     val_this_month = 0.0
@@ -538,6 +565,10 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
             grid.append(subtotal)
             for i in range(14):
                 cat_totals[i] += route_totals[i]
+                if not is_press_route and cat_id != '＜参考＞事業所間横持ち':
+                    bulk_totals[i] += route_totals[i]
+            if not is_press_route and cat_id != '＜参考＞事業所間横持ち':
+                bulk_has_rows = True
         cat_subtotal: List[Any] = [None] * 20
         cat_subtotal[0] = ''
         cat_subtotal[0] = f'{cat_disp}合計'
@@ -677,17 +708,25 @@ def build_micro_report(
         df_in['客先名称'] = df_in.get('仕入先名', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
         df_in['運送業者'] = ''  # AG-0006: 運送店名では行を分けない（自社/他社は区分で区別済み）
         df_in['品名'] = df_in.get('品名', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
-        df_in['区分'] = df_in.get('経路分類', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip()
+        df_in['区分'] = df_in.get('経路分類', pd.Series(['']*len(df_in))).fillna('').astype(str).str.strip().map(_route_display)
 
         order_dai = ['①段ボール', '②新聞', '③雑誌', '④プラ類', '⑤その他', '⑥古布・繊維', '＜参考＞事業所間横持ち']
         daimoku_groups = dict(list(df_in.groupby('大品目分類')))
-        
+
         grand_total_days = [0] * 31
         for daimoku in order_dai:
             if daimoku not in daimoku_groups: continue
             df_dai = daimoku_groups[daimoku]
-            for keiro, df_keiro in df_dai.groupby('経路分類'):
-                grid.append([f"{daimoku}-{keiro}"] + [""] * 36)
+            keiro_groups: Dict[str, pd.DataFrame] = {str(k): g for k, g in df_dai.groupby('経路分類')}
+            bulk_days = [0] * 31
+            has_bulk = False
+            for keiro_name in sorted(keiro_groups, key=_route_sort_key):
+                df_keiro = keiro_groups[keiro_name]
+                keiro_label = _route_display(keiro_name)
+                if keiro_name == PRESS_ROUTE and has_bulk:
+                    # プレス品の区画の前に、バラ（持込み＋回収）の合計を出す。プレス品が無い品目には出さない
+                    grid.append(['', "バラ合計", '', '', ''] + [format_num(v) for v in bulk_days] + [format_num(sum(bulk_days))])
+                grid.append([f"{daimoku}-{keiro_label}"] + [""] * 36)
                 df_gyousya = df_keiro.groupby(['管理会社', '客先名称', '運送業者', '品名', '区分'])
                 for keys, df_g in df_gyousya:
                     kanri, kyakusaki, unso, hinmei, kubun = keys
@@ -707,7 +746,10 @@ def build_micro_report(
                     if d is not None:
                         days_sub[d] += r.get('実重量', 0)
                 sub_total = sum(days_sub)
-                grid.append(['', f"{keiro}合計", '', '', ''] + [format_num(v) for v in days_sub] + [format_num(sub_total)])
+                grid.append(['', f"{keiro_label}合計", '', '', ''] + [format_num(v) for v in days_sub] + [format_num(sub_total)])
+                if keiro_name != PRESS_ROUTE:
+                    has_bulk = True
+                    bulk_days = [a + b for a, b in zip(bulk_days, days_sub)]
             
             days_dai = [0] * 31
             for _, r in df_dai.iterrows():

@@ -127,3 +127,70 @@ def test_rows_are_not_split_by_carrier() -> None:
     assert len(kraft_m) == 1 and kraft_m[0][18] == "300"
     daio_m = [r for r in macro if r[2] == "大王製紙" and r[4] == "新聞プレス"]
     assert len(daio_m) == 1 and daio_m[0][18] == "22,000"
+
+
+def _bulk_press_reports() -> tuple:
+    """段ボール（バラ2経路＋プレス）と新聞（バラのみ）の入荷から、日次・計シートの表を作る"""
+    from aggregate_report import prepare_raw_data
+    base = {"年月日": "2026/08/03", "調整重量": 0, "運送店名": None}
+    data = [
+        {**base, "仕入先名": "客先A", "品名": "段ボールバラ", "取引区分": "持込", "正味重量": 1000},
+        {**base, "仕入先名": "客先B", "品名": "段ボールバラ", "取引区分": "引取", "運送店名": "鏡紙業", "正味重量": 500},
+        {**base, "仕入先名": "客先C", "品名": "段ボールプレス", "取引区分": "持込", "正味重量": 2000},
+        {**base, "仕入先名": "客先D", "品名": "新聞バラ", "取引区分": "持込", "正味重量": 300},
+    ]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+    return (build_micro_report(df_in, df_out, target_year=2026, target_month=8),
+            build_macro_report(df_in, df_out, target_year=2026, target_month=8))
+
+
+def _micro_outline(micro: list, daimoku: str) -> list:
+    """日次シートの1品目分の「見出し・小計」の並び（明細行は除く）"""
+    outline: list = []
+    for r in micro:
+        if r[0].startswith(f"{daimoku}-"):
+            outline.append(r[0])
+        elif outline and r[0] == "" and r[1].endswith("合計") and r[2] == "":
+            outline.append(r[1])
+            if r[1] == f"{daimoku} 合計":
+                break
+    return outline
+
+
+def test_micro_report_distinguishes_bulk_and_press() -> None:
+    """日次シート: バラとプレス品を区分・見出し・小計で区別し、バラ合計を出す（AG-0011）"""
+    micro, _ = _bulk_press_reports()
+    assert _micro_outline(micro, "①段ボール") == [
+        "①段ボール-バラ・持込み", "バラ・持込み合計",
+        "①段ボール-バラ・他社回収", "バラ・他社回収合計",
+        "バラ合計",
+        "①段ボール-プレス品", "プレス品合計",
+        "①段ボール 合計",
+    ]
+    by_name = {r[1]: r for r in micro if len(r) > 36}
+    assert by_name["客先A"][4] == "バラ・持込み"
+    assert by_name["客先B"][4] == "バラ・他社回収"
+    assert by_name["客先C"][4] == "プレス品"
+    assert by_name["バラ合計"][36] == "1,500"
+    assert by_name["プレス品合計"][36] == "2,000"
+    assert by_name["①段ボール 合計"][36] == "3,500"
+
+
+def test_micro_report_has_no_bulk_subtotal_without_press() -> None:
+    """プレス品が無い品目（新聞）には、品目合計と同じ値になるバラ合計を出さない"""
+    micro, _ = _bulk_press_reports()
+    assert _micro_outline(micro, "②新聞") == ["②新聞-バラ・持込み", "バラ・持込み合計", "②新聞 合計"]
+
+
+def test_macro_report_distinguishes_bulk_and_press() -> None:
+    """計シート: 区分にバラ／プレス品を出し、プレス品の区画の前にバラ合計を出す（新聞には出さない）"""
+    _, macro = _bulk_press_reports()
+    by_client = {r[2]: r for r in macro if len(r) > 5 and r[2]}
+    assert by_client["客先A"][5] == "バラ・持込み"
+    assert by_client["客先B"][5] == "バラ・他社回収"
+    assert by_client["客先C"][5] == "プレス品"
+    bulk_rows = [i for i, r in enumerate(macro) if r[0] == "バラ合計"]
+    assert len(bulk_rows) == 1
+    assert macro[bulk_rows[0]][18] == "1,500"
+    press_header = next(i for i, r in enumerate(macro) if r[0] == "4.その他・プレス")
+    assert bulk_rows[0] < press_header
