@@ -228,3 +228,32 @@ def test_macro_report_has_totals_with_and_without_yokomochi() -> None:
     assert totals["入荷合計（横持除く）"] == "1,300"
     assert totals["入荷総合計（横持含む）"] == "1,800"
     assert next(r[18] for r in macro if r[0] == "出荷総合計") == "700"
+
+
+def test_micro_report_has_first_half_month_cumulative_column() -> None:
+    """日次シート: 全行の右端に「1〜15日累計」を出す。15日までを含み、16日以降は含めない（AG-0013）"""
+    from aggregate_report import prepare_raw_data
+    base = {"調整重量": 0, "運送店名": None, "取引区分": "持込"}
+    data = [
+        {**base, "年月日": "2026/08/05", "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 1000},
+        {**base, "年月日": "2026/08/15", "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 200},
+        {**base, "年月日": "2026/08/16", "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 300},
+        {**base, "年月日": "2026/08/20", "仕入先名": "客先B", "品名": "新聞バラ", "正味重量": 400},
+        {**base, "年月日": "2026/08/10", "得意先名": "大王製紙", "品名": "新聞プレス", "正味重量": 700},
+        {**base, "年月日": "2026/08/20", "得意先名": "大王製紙", "品名": "新聞プレス", "正味重量": 100},
+    ]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+    micro = build_micro_report(df_in, df_out, target_year=2026, target_month=8)
+
+    assert micro[0][-2:] == ["合計", "1〜15日累計"]
+    assert {len(r) for r in micro} == {38}, "見出し・空行を含め、全行の列数が揃っている"
+    by_label = {r[1]: r for r in micro if r[0] == "" and r[1]}
+    by_client = {r[1]: r for r in micro if r[1] in ("客先A", "客先B")}
+    # 客先A: 5日1,000 + 15日200 + 16日300。累計は15日まで
+    assert (by_client["客先A"][36], by_client["客先A"][37]) == ("1,500", "1,200")
+    # 15日までに伝票が無ければ空欄
+    assert (by_client["客先B"][36], by_client["客先B"][37]) == ("400", "")
+    assert by_label["①段ボール 合計"][37] == "1,200"
+    assert by_label["入荷合計（横持除く）"][37] == "1,200"
+    assert by_label["入荷総合計（横持含む）"][37] == "1,200"
+    assert (by_label["出荷総合計"][36], by_label["出荷総合計"][37]) == ("800", "700")

@@ -728,8 +728,12 @@ def build_micro_report(
         if pd.isna(val) or val == 0: return ""
         return f"{int(val):,}"
 
-    grid = []
-    headers = ["管理会社", "客先名称", "運送業者", "品名", "区分"] + [f"{i}日" for i in range(1, 32)] + ["合計"]
+    def days_cells(days: List[Any]) -> List[str]:
+        """1日〜31日の値、月合計、1〜15日累計の順に並べる（AG-0013）"""
+        return [format_num(v) for v in days] + [format_num(sum(days)), format_num(sum(days[:15]))]
+
+    grid: List[List[Any]] = []
+    headers = ["管理会社", "客先名称", "運送業者", "品名", "区分"] + [f"{i}日" for i in range(1, 32)] + ["合計", "1〜15日累計"]
     grid.append(headers)
 
     if not df_in.empty:
@@ -756,8 +760,8 @@ def build_micro_report(
                 keiro_label = _route_display(keiro_name)
                 if keiro_name == PRESS_ROUTE and has_bulk:
                     # プレス品の区画の前に、バラ（持込み＋回収）の合計を出す。プレス品が無い品目には出さない
-                    grid.append(['', "バラ合計", '', '', ''] + [format_num(v) for v in bulk_days] + [format_num(sum(bulk_days))])
-                grid.append([f"{daimoku}-{keiro_label}"] + [""] * 36)
+                    grid.append(['', "バラ合計", '', '', ''] + days_cells(bulk_days))
+                grid.append([f"{daimoku}-{keiro_label}"] + [""] * 37)
                 df_gyousya = df_keiro.groupby(['管理会社', '客先名称', '運送業者', '品名', '区分'])
                 for keys, df_g in df_gyousya:
                     kanri, kyakusaki, unso, hinmei, kubun = keys
@@ -768,7 +772,7 @@ def build_micro_report(
                             days_val[d] += r.get('実重量', 0)
                     total = sum(days_val)
                     if total > 0:
-                        row = [kanri, kyakusaki, unso, hinmei, kubun] + [format_num(v) for v in days_val] + [format_num(total)]
+                        row = [kanri, kyakusaki, unso, hinmei, kubun] + days_cells(days_val)
                         grid.append(row)
                 
                 days_sub = [0] * 31
@@ -777,7 +781,7 @@ def build_micro_report(
                     if d is not None:
                         days_sub[d] += r.get('実重量', 0)
                 sub_total = sum(days_sub)
-                grid.append(['', f"{keiro_label}合計", '', '', ''] + [format_num(v) for v in days_sub] + [format_num(sub_total)])
+                grid.append(['', f"{keiro_label}合計", '', '', ''] + days_cells(days_sub))
                 if keiro_name != PRESS_ROUTE:
                     has_bulk = True
                     bulk_days = [a + b for a, b in zip(bulk_days, days_sub)]
@@ -789,8 +793,8 @@ def build_micro_report(
                     days_dai[d] += r.get('実重量', 0)
                     grand_total_days[d] += r.get('実重量', 0)
             dai_total = sum(days_dai)
-            grid.append(['', f"{daimoku} 合計", '', '', ''] + [format_num(v) for v in days_dai] + [format_num(dai_total)])
-            grid.append([''] * 37)
+            grid.append(['', f"{daimoku} 合計", '', '', ''] + days_cells(days_dai))
+            grid.append([''] * 38)
         
         # 事業所の入荷合計は横持ちを除く（事務員の表の「入荷合計（横持除く）」）。横持ちを含む総量も併記する（AG-0012）
         yokomochi_days = [0] * 31
@@ -799,11 +803,11 @@ def build_micro_report(
             if d is not None:
                 yokomochi_days[d] += r.get('実重量', 0)
         own_days = [a - b for a, b in zip(grand_total_days, yokomochi_days)]
-        grid.append(['', "入荷合計（横持除く）", '', '', ''] + [format_num(v) for v in own_days] + [format_num(sum(own_days))])
-        grid.append(['', "入荷総合計（横持含む）", '', '', ''] + [format_num(v) for v in grand_total_days] + [format_num(sum(grand_total_days))])
-        grid.append([''] * 37)
+        grid.append(['', "入荷合計（横持除く）", '', '', ''] + days_cells(own_days))
+        grid.append(['', "入荷総合計（横持含む）", '', '', ''] + days_cells(grand_total_days))
+        grid.append([''] * 38)
 
-    grid.append(["＜出荷＞"] + [""] * 36)
+    grid.append(["＜出荷＞"] + [""] * 37)
     if not df_out.empty:
         df_out['管理会社'] = ''
         df_out['客先名称'] = df_out.get('client_name', pd.Series(['']*len(df_out))).fillna('').astype(str).str.strip()
@@ -819,7 +823,7 @@ def build_micro_report(
             if daimoku not in daimoku_groups: continue
             df_dai = daimoku_groups[daimoku]
             for keiro, df_keiro in df_dai.groupby('経路分類'):
-                grid.append([f"{daimoku}-{keiro}"] + [""] * 36)
+                grid.append([f"{daimoku}-{keiro}"] + [""] * 37)
                 df_gyousya = df_keiro.groupby(['管理会社', '客先名称', '運送業者', '品名', '区分'])
                 for keys, df_g in df_gyousya:
                     kanri, kyakusaki, unso, hinmei, kubun = keys
@@ -830,7 +834,7 @@ def build_micro_report(
                             days_val[d] += r.get('実重量', 0)
                     total = sum(days_val)
                     if total > 0:
-                        row = [kanri, kyakusaki, unso, hinmei, kubun] + [format_num(v) for v in days_val] + [format_num(total)]
+                        row = [kanri, kyakusaki, unso, hinmei, kubun] + days_cells(days_val)
                         grid.append(row)
                 
                 days_sub = [0] * 31
@@ -839,7 +843,7 @@ def build_micro_report(
                     if d is not None:
                         days_sub[d] += r.get('実重量', 0)
                 sub_total = sum(days_sub)
-                grid.append(['', f"{keiro}合計", '', '', ''] + [format_num(v) for v in days_sub] + [format_num(sub_total)])
+                grid.append(['', f"{keiro}合計", '', '', ''] + days_cells(days_sub))
             
             days_dai = [0] * 31
             for _, r in df_dai.iterrows():
@@ -848,11 +852,11 @@ def build_micro_report(
                     days_dai[d] += r.get('実重量', 0)
                     grand_total_days[d] += r.get('実重量', 0)
             dai_total = sum(days_dai)
-            grid.append(['', f"{daimoku} 合計", '', '', ''] + [format_num(v) for v in days_dai] + [format_num(dai_total)])
-            grid.append([''] * 37)
+            grid.append(['', f"{daimoku} 合計", '', '', ''] + days_cells(days_dai))
+            grid.append([''] * 38)
         
         grand_total = sum(grand_total_days)
-        grid.append(['', "出荷総合計", '', '', ''] + [format_num(v) for v in grand_total_days] + [format_num(grand_total)])
+        grid.append(['', "出荷総合計", '', '', ''] + days_cells(grand_total_days))
 
     return grid
 

@@ -26,7 +26,7 @@ def test_totals_match():
         for row in micro_report:
             if len(row) > 1 and str(row[1]) == '入荷総合計（横持含む）':
                 try:
-                    report_total = float(str(row[-1]).replace(',', ''))
+                    report_total = float(str(row[36]).replace(',', ''))
                 except:
                     pass
         
