@@ -439,6 +439,7 @@ def _normalize_for_compare(s: str) -> str:
 
 
 # 入荷の経路分類の表示順（持込み → 回収 → プレス品）と、バラ／プレス品の区別（AG-0011）
+YOKOMOCHI_CATEGORY = "＜参考＞事業所間横持ち"
 PRESS_ROUTE = "プレス品"
 _ROUTE_ORDER = ["持込み", "自社回収", "他社回収", PRESS_ROUTE]
 
@@ -480,6 +481,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
     top_header[4] = '品名'
     top_header[5] = '区分'
     grid.append(top_header)
+    own_totals = [0.0] * 14
+    yokomochi_totals = [0.0] * 14
     for cat_info in MASTER_HIERARCHY:
         cat_id = cat_info['cat_id']
         cat_disp = cat_info.get('cat_disp', cat_id)
@@ -579,6 +582,23 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
         cat_subtotal[19] = format_num(cat_totals[13])
         grid.append(cat_subtotal)
         grid.append([None] * 20)
+        target_totals = yokomochi_totals if cat_id == YOKOMOCHI_CATEGORY else own_totals
+        for i in range(14):
+            target_totals[i] += cat_totals[i]
+    # 事業所の入荷合計は横持ちを除く（事務員の表の「入荷合計（横持除く）」）。横持ちを含む総量も併記する（AG-0012）
+    for total_label, totals in (
+        ('入荷合計（横持除く）', own_totals),
+        ('入荷総合計（横持含む）', [a + b for a, b in zip(own_totals, yokomochi_totals)]),
+    ):
+        total_row: List[Any] = [None] * 20
+        total_row[0] = total_label
+        total_row[1] = ''
+        for i in range(13):
+            if totals[i] != 0:
+                total_row[i + 6] = format_num(totals[i])
+        total_row[19] = format_num(totals[13])
+        grid.append(total_row)
+    grid.append([None] * 20)
     if df_outbound is not None and (not df_outbound.empty):
         df_out = df_outbound.copy()
         if 'transaction_date' in df_out.columns:
@@ -588,6 +608,7 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
             df_out['_date'] = pd.NaT
             df_out['_ym'] = pd.NaT
         grid.append(['＜出荷＞'] + [None] * 19)
+        shipping_totals = [0.0] * 14
         for cat_info in SHIPPING_HIERARCHY:
             cat_id = cat_info['cat_id']
             cat_disp = cat_info['cat_disp']
@@ -651,6 +672,16 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
             cat_subtotal[19] = format_num(cat_shipping_totals[13])
             grid.append(cat_subtotal)
             grid.append([None] * 20)
+            for i in range(14):
+                shipping_totals[i] += cat_shipping_totals[i]
+        ship_total_row: List[Any] = [None] * 20
+        ship_total_row[0] = '出荷総合計'
+        ship_total_row[1] = ''
+        for i in range(13):
+            if shipping_totals[i] != 0:
+                ship_total_row[i + 6] = format_num(shipping_totals[i])
+        ship_total_row[19] = format_num(shipping_totals[13])
+        grid.append(ship_total_row)
     return grid
 
 
@@ -761,8 +792,15 @@ def build_micro_report(
             grid.append(['', f"{daimoku} 合計", '', '', ''] + [format_num(v) for v in days_dai] + [format_num(dai_total)])
             grid.append([''] * 37)
         
-        grand_total = sum(grand_total_days)
-        grid.append(['', "入荷総合計", '', '', ''] + [format_num(v) for v in grand_total_days] + [format_num(grand_total)])
+        # 事業所の入荷合計は横持ちを除く（事務員の表の「入荷合計（横持除く）」）。横持ちを含む総量も併記する（AG-0012）
+        yokomochi_days = [0] * 31
+        for _, r in daimoku_groups.get(YOKOMOCHI_CATEGORY, df_in.iloc[0:0]).iterrows():
+            d = _day_index(r.get('_day'))
+            if d is not None:
+                yokomochi_days[d] += r.get('実重量', 0)
+        own_days = [a - b for a, b in zip(grand_total_days, yokomochi_days)]
+        grid.append(['', "入荷合計（横持除く）", '', '', ''] + [format_num(v) for v in own_days] + [format_num(sum(own_days))])
+        grid.append(['', "入荷総合計（横持含む）", '', '', ''] + [format_num(v) for v in grand_total_days] + [format_num(sum(grand_total_days))])
         grid.append([''] * 37)
 
     grid.append(["＜出荷＞"] + [""] * 36)

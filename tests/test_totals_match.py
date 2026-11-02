@@ -21,10 +21,10 @@ def test_totals_match():
         df_in_filtered = _filter_month(df_in, 2026, month)
         expected_total = df_in_filtered['実重量'].sum() if not df_in_filtered.empty else 0
         
-        # レポートから '入荷総合計' を探す
+        # レポートから '入荷総合計（横持含む）' を探す（生データの正味重量の合計は横持ちも含む）
         report_total = 0
         for row in micro_report:
-            if len(row) > 1 and str(row[1]) == '入荷総合計':
+            if len(row) > 1 and str(row[1]) == '入荷総合計（横持含む）':
                 try:
                     report_total = float(str(row[-1]).replace(',', ''))
                 except:

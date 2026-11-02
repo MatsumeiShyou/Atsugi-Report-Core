@@ -194,3 +194,37 @@ def test_macro_report_distinguishes_bulk_and_press() -> None:
     assert macro[bulk_rows[0]][18] == "1,500"
     press_header = next(i for i, r in enumerate(macro) if r[0] == "4.その他・プレス")
     assert bulk_rows[0] < press_header
+
+
+def _yokomochi_reports() -> tuple:
+    """通常の入荷（段ボール1,000・新聞300）と、事業所間横持ち（500）から日次・計シートを作る"""
+    from aggregate_report import prepare_raw_data
+    base = {"年月日": "2026/08/03", "調整重量": 0, "運送店名": None, "取引区分": "持込"}
+    data = [
+        {**base, "仕入先名": "客先A", "品名": "段ボールバラ", "正味重量": 1000},
+        {**base, "仕入先名": "客先B", "品名": "新聞バラ", "正味重量": 300},
+        {**base, "仕入先名": "(横持)本社事業所", "品名": "段ボールバラ", "正味重量": 500},
+        {**base, "得意先名": "大王製紙", "品名": "新聞プレス", "正味重量": 700},
+    ]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+    return (build_micro_report(df_in, df_out, target_year=2026, target_month=8),
+            build_macro_report(df_in, df_out, target_year=2026, target_month=8))
+
+
+def test_micro_report_has_totals_with_and_without_yokomochi() -> None:
+    """日次シート: 入荷の合計を「横持除く」と「横持含む」の2行で出す（AG-0012）。事務員の表の入荷合計は横持除く"""
+    micro, _ = _yokomochi_reports()
+    totals = {r[1]: r[36] for r in micro if len(r) > 36 and r[0] == "" and r[1].startswith("入荷")}
+    assert totals["入荷合計（横持除く）"] == "1,300"
+    assert totals["入荷総合計（横持含む）"] == "1,800"
+    assert "入荷総合計" not in totals
+    assert next(r[36] for r in micro if len(r) > 36 and r[1] == "出荷総合計") == "700"
+
+
+def test_macro_report_has_totals_with_and_without_yokomochi() -> None:
+    """計シート: 日次シートと同じ意味の入荷合計（横持除く／含む）を出す。当月の列は18列目"""
+    _, macro = _yokomochi_reports()
+    totals = {r[0]: r[18] for r in macro if str(r[0]).startswith("入荷")}
+    assert totals["入荷合計（横持除く）"] == "1,300"
+    assert totals["入荷総合計（横持含む）"] == "1,800"
+    assert next(r[18] for r in macro if r[0] == "出荷総合計") == "700"
