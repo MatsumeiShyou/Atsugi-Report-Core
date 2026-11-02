@@ -81,7 +81,7 @@ def main() -> None:
         macro_grid = build_macro_report(df_macro_in, df_macro_out, target_year=target_year, target_month=target_month)
         micro_grid = build_micro_report(df_micro_in, df_micro_out, target_year=target_year, target_month=target_month)
 
-        warning_text = generate_warnings(df_inbound)
+        warning_text = generate_warnings(df_inbound, target_year=target_year, target_month=target_month)
         if warning_text:
             logger.info(warning_text)
 

@@ -119,6 +119,44 @@ def test_newspaper_pickup_is_not_reported_as_unregistered():
     assert "新聞バラ" not in warning
 
 
+def test_vinyl_is_plastic_category():
+    """ビニールはプラ類（事務員の表でもプラ区画に計上）。ビニール重袋・カップ原紙(ビニール)は従来どおり「その他」"""
+    from aggregate_report import generate_warnings
+    df = _inbound([
+        {"仕入先名": "客先A", "品名": "ビニール"},
+        {"仕入先名": "客先B", "品名": "ビニールA"},
+        {"仕入先名": "客先C", "品名": "ビニール重袋"},
+        {"仕入先名": "客先D", "品名": "カップ原紙(ビニールE)プレス"},
+    ])
+    assert df.loc["客先A", "大品目分類"] == "④プラ類"
+    assert df.loc["客先B", "大品目分類"] == "④プラ類"
+    assert df.loc["客先C", "大品目分類"] == "⑤その他"
+    assert df.loc["客先D", "大品目分類"] == "⑤その他"
+    assert "ビニール" not in generate_warnings(df.reset_index())
+
+
+def test_trs_wento_product_is_other_category():
+    """(製品)TRSウェントは「その他」（人間の指示 2026-11-02）。登録済みなので未登録の警告も出さない"""
+    from aggregate_report import generate_warnings
+    df = _inbound([{"仕入先名": "客先A", "品名": "(製品)TRSウェント100入り", "取引区分": "持込"}])
+    assert df.loc["客先A", "大品目分類"] == "⑤その他"
+    assert generate_warnings(df.reset_index()) == ""
+
+
+def test_unregistered_warning_covers_target_month_only():
+    """未登録の警告は対象月の伝票だけを数える（全期間を数えると、どの月のシートも同じ件数になる）"""
+    from aggregate_report import generate_warnings
+    df = _inbound([
+        {"仕入先名": "客先A", "品名": "存在しない品名8月", "年月日": "2026/08/03", "正味重量": 100},
+        {"仕入先名": "客先B", "品名": "存在しない品名9月", "年月日": "2026/09/03", "正味重量": 200},
+    ]).reset_index()
+    august = generate_warnings(df, target_year=2026, target_month=8)
+    assert "存在しない品名8月" in august
+    assert "存在しない品名9月" not in august
+    assert "1件" in august
+    assert generate_warnings(df, target_year=2026, target_month=7) == ""
+
+
 def test_purchase_adjustment_slip_adds_no_weight():
     """仕入調整伝票（正味0・調整重量のみ）は計上しない。事務員は正味重量だけを集計している"""
     df = _inbound([

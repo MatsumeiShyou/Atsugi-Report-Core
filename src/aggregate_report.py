@@ -803,7 +803,10 @@ def build_excluded_report(df_excluded: pd.DataFrame, target_year: int, target_mo
     return [[title], headers] + rows
 
 
-def generate_warnings(df: pd.DataFrame) -> str:
+def generate_warnings(df: pd.DataFrame, target_year: Optional[int] = None, target_month: Optional[int] = None) -> str:
+    """未登録の品名の警告文を作る。年月を渡すとその月の伝票だけを数える"""
+    if target_year is not None and target_month is not None:
+        df = _filter_month(df, target_year, target_month)
     unknown_items = []
     for idx, row in df.iterrows():
         if row.get("大品目分類") == "⑤その他":
