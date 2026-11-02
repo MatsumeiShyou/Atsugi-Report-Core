@@ -273,3 +273,24 @@ def test_micro_report_has_weather_row_under_header() -> None:
 
     without = build_micro_report(df_in, df_out, target_year=2026, target_month=8)
     assert all(r[1] != "天気" for r in without), "天気を渡さなければ行を足さない"
+
+
+def test_macro_report_blanks_year_over_year_for_unfinished_month() -> None:
+    """計シート: 月が終わるまでは前年同月差分を出さない（途中の月を前年の1か月分と比べると大きなマイナスに見えるため）"""
+    import datetime
+    from aggregate_report import prepare_raw_data
+    base = {"調整重量": 0, "運送店名": None, "取引区分": "持込", "仕入先名": "客先A", "品名": "段ボールバラ"}
+    data = [
+        {**base, "年月日": "2025/08/10", "正味重量": 5000},   # 前年同月
+        {**base, "年月日": "2026/08/10", "正味重量": 1000},
+    ]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(data)))
+
+    unfinished = build_macro_report(df_in, df_out, target_year=2026, target_month=8, today=datetime.date(2026, 8, 31))
+    assert unfinished[0][19] == "前年同月差分", "見出しは残す"
+    assert all(r[19] in (None, "") for r in unfinished[1:]), "8/31 はまだ月の途中（31日のデータは翌日にそろう）"
+
+    finished = build_macro_report(df_in, df_out, target_year=2026, target_month=8, today=datetime.date(2026, 9, 1))
+    row = next(r for r in finished if r[2] == "客先A")
+    assert row[19] == "-4,000"
+    assert next(r[19] for r in finished if r[0] == "入荷合計（横持除く）") == "-4,000"

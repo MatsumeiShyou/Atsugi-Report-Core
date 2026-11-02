@@ -273,3 +273,23 @@ def test_supabase_rule_master_does_not_change_results(monkeypatch):
     ])
     assert df.index.tolist() == ["(株)神奈中商事"]
     assert df["実重量"].sum() == 1000
+
+
+def test_macro_report_keeps_outbound_rows_without_transaction_type():
+    """計シートの出荷: 取引区分が空欄の出荷伝票（実データの出荷は全件空欄）も行・合計に出る。日次シートと当月の出荷合計が一致する"""
+    from aggregate_report import build_macro_report, build_micro_report
+    base = {"年月日": "2026/08/04", "調整重量": 0, "運送店名": None, "取引区分": None}
+    rows = [
+        {**base, "得意先名": "大王製紙", "品名": "新聞プレス", "正味重量": 10000},
+        {**base, "得意先名": "大王製紙", "品名": "新聞プレス", "正味重量": 12000},
+        {**base, "得意先名": "坪野谷紙業貿易部", "品名": "段ボールプレス", "正味重量": 5000},
+    ]
+    df_in, df_out = transform_raw_data(prepare_raw_data(pd.DataFrame(rows)))
+
+    macro = build_macro_report(df_in, df_out, target_year=2026, target_month=8)
+    daio = [r for r in macro if r[2] == "大王製紙" and r[4] == "新聞プレス"]
+    assert len(daio) == 1 and daio[0][18] == "22,000"
+    assert next(r[18] for r in macro if r[0] == "出荷総合計") == "27,000"
+
+    micro = build_micro_report(df_in, df_out, target_year=2026, target_month=8)
+    assert next(r[36] for r in micro if len(r) > 36 and r[1] == "出荷総合計") == "27,000"

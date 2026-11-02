@@ -452,7 +452,7 @@ def _route_display(route: str) -> str:
 def _route_sort_key(route: str) -> Tuple[int, str]:
     return (_ROUTE_ORDER.index(route) if route in _ROUTE_ORDER else len(_ROUTE_ORDER), route)
 
-def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFrame]=None, target_year: Optional[int]=None, target_month: Optional[int]=None) -> List[List[Any]]:
+def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFrame]=None, target_year: Optional[int]=None, target_month: Optional[int]=None, today: Optional[datetime.date]=None) -> List[List[Any]]:
     grid: List[List[Any]] = []
     df_in = df_inbound.copy()
     if 'transaction_date' in df_in.columns:
@@ -619,6 +619,8 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 route_match_list = route_info['route_match']
                 route_disp = route_info['route_disp']
                 route_df = df_out[(df_out['大品目分類'] == cat_id) & df_out['経路分類'].isin(route_match_list)].copy()
+                # 出荷伝票は取引区分が空欄のため、行まとめのキーに入れると全件が落ちる。空欄は空文字にする
+                route_df['取引区分'] = route_df['取引区分'].fillna('')
                 grid.append([route_id, ''] + [None] * 18)
                 route_totals = [0.0] * 14
                 if not route_df.empty:
@@ -682,6 +684,13 @@ def build_macro_report(df_inbound: pd.DataFrame, df_outbound: Optional[pd.DataFr
                 ship_total_row[i + 6] = format_num(shipping_totals[i])
         ship_total_row[19] = format_num(shipping_totals[13])
         grid.append(ship_total_row)
+    # 月の途中は前年同月差分を出さない（途中の月を前年の1か月分と比べると、大きなマイナスに見えるため）。見出しは残す
+    today = today or datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).date()
+    month_end = (target_period + 1).to_timestamp().date() - datetime.timedelta(days=1)
+    if today <= month_end:
+        for row in grid[1:]:
+            if len(row) > 19:
+                row[19] = None
     return grid
 
 
